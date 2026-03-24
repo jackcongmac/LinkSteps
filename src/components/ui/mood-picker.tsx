@@ -16,11 +16,11 @@ interface MoodOption {
 }
 
 export const moodOptions: MoodOption[] = [
-  { level: 1, label: "很低落", icon: Zap, iconName: "Zap" },
-  { level: 2, label: "不太好", icon: CloudRain, iconName: "CloudRain" },
-  { level: 3, label: "一般", icon: Cloud, iconName: "Cloud" },
-  { level: 4, label: "不错", icon: Smile, iconName: "Smile" },
-  { level: 5, label: "很开心", icon: Sun, iconName: "Sun" },
+  { level: 1, label: "Very Low", icon: Zap, iconName: "Zap" },
+  { level: 2, label: "Not Great", icon: CloudRain, iconName: "CloudRain" },
+  { level: 3, label: "Okay", icon: Cloud, iconName: "Cloud" },
+  { level: 4, label: "Good", icon: Smile, iconName: "Smile" },
+  { level: 5, label: "Great", icon: Sun, iconName: "Sun" },
 ];
 
 interface MoodPickerProps {
@@ -31,7 +31,7 @@ interface MoodPickerProps {
 export default function MoodPicker({ value, onChange }: MoodPickerProps) {
   return (
     <fieldset className="rounded-3xl bg-white p-4 shadow-sm">
-      <legend className="sr-only">选择今日情绪</legend>
+      <legend className="sr-only">Select today&apos;s mood</legend>
       <div className="flex items-center justify-between gap-2">
         {moodOptions.map(({ level, label, icon: Icon }) => {
           const isSelected = value === level;

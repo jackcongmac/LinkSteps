@@ -1,0 +1,37 @@
+/**
+ * Re-export all types from docs/types.ts for convenience.
+ * Import via: import type { Profile, DailyLog } from '@/types'
+ */
+export type {
+  UserRole,
+  LogCategory,
+  InvitationStatus,
+  FeedbackEmoji,
+  Profile,
+  Child,
+  ChildTeacher,
+  DailyLog,
+  LogEntry,
+  Feedback,
+  AuditLog,
+  MoodValue,
+  SleepValue,
+  MealValue,
+  MedicationValue,
+  BehaviorValue,
+  NoteValue,
+  LogEntryValue,
+  DailyLogWithEntries,
+  FeedbackWithAuthor,
+  ChildWithTeachers,
+  ProfileInsert,
+  ProfileUpdate,
+  ChildInsert,
+  ChildUpdate,
+  DailyLogUpsert,
+  LogEntryInsert,
+  FeedbackInsert,
+  ChildTeacherInsert,
+  BulkCreateLogEntriesInput,
+  BulkCreateLogEntriesResult,
+} from '../../docs/types';

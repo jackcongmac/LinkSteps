@@ -77,9 +77,19 @@ function SeatDots({ used, total }: { used: number; total: number }) {
 
 // ── Inner component (reads searchParams) ─────────────────────
 
+// ── Age window constants (sliding, recalculated each render) ──
+// Supports ages 0–22. Both bounds auto-advance every calendar year.
+const MAX_AGE = 22;
+
 function SettingsInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
+
+  // Sliding date-range window — recalculated on every render so the
+  // limits advance automatically on New Year without any code change.
+  const currentYear = new Date().getFullYear();
+  const minDate = `${currentYear - MAX_AGE}-01-01`; // e.g. 2004-01-01 in 2026
+  const maxDate = `${currentYear}-12-31`;            // e.g. 2026-12-31 in 2026
 
   // If an invite link was used, the role is pre-set and locked.
   const inviteRole = searchParams.get("role") as UserProfile["role"] | null;
@@ -269,25 +279,41 @@ function SettingsInner() {
               id="child-birthday"
               type="date"
               value={profile.child_birthday ?? ""}
-              max={new Date().toISOString().split("T")[0]}
-              min={new Date(new Date().setFullYear(new Date().getFullYear() - 25))
-                .toISOString()
-                .split("T")[0]}
-              onChange={(e) =>
-                setProfile({ ...profile, child_birthday: e.target.value || undefined })
-              }
+              min={minDate}
+              max={maxDate}
+              onChange={(e) => {
+                const val = e.target.value || undefined;
+                // Out-of-range guard: browser enforces min/max natively, but
+                // validate here too in case of manual entry or paste.
+                if (val) {
+                  const year = parseInt(val.slice(0, 4), 10);
+                  if (year < currentYear - MAX_AGE || year > currentYear) return;
+                }
+                setProfile({ ...profile, child_birthday: val });
+              }}
               className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-800 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100 transition-colors"
             />
-            {profile.child_birthday && (
-              <div className="space-y-0.5">
-                <p className="text-xs font-medium text-sky-600">
-                  {formatAge(profile.child_birthday)}
-                </p>
-                <p className="text-xs text-slate-400">
-                  {devStageLabel(profile.child_birthday)}
-                </p>
-              </div>
-            )}
+            {profile.child_birthday && (() => {
+              const year = parseInt(profile.child_birthday.slice(0, 4), 10);
+              const outOfRange = year < currentYear - MAX_AGE || year > currentYear;
+              if (outOfRange) {
+                return (
+                  <p className="text-xs text-rose-500">
+                    LinkSteps currently supports ages 0–{MAX_AGE}.
+                  </p>
+                );
+              }
+              return (
+                <div className="space-y-0.5">
+                  <p className="text-xs font-medium text-sky-600">
+                    {formatAge(profile.child_birthday)}
+                  </p>
+                  <p className="text-xs text-slate-400">
+                    {devStageLabel(profile.child_birthday)}
+                  </p>
+                </div>
+              );
+            })()}
           </div>
         </section>
 

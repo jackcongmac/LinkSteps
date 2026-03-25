@@ -236,14 +236,17 @@ export async function getProfile(): Promise<UserProfile> {
  * Gracefully ignores missing-table errors.
  */
 export async function upsertProfile(profile: UserProfile): Promise<{ error?: string }> {
+  // localStorage is written first — this is the source of truth for the app.
+  // DB sync is best-effort; any DB failure is logged but not surfaced as an error.
   writeLocalProfile(profile);
 
   try {
     const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return { error: 'Not signed in.' };
+    if (!user) return {}; // Not signed in — localStorage save is enough
 
-    const { error } = await supabase
+    // Tier 1: full upsert (all columns)
+    const { error: e1 } = await supabase
       .from('profiles')
       .upsert({
         id:             user.id,
@@ -254,30 +257,42 @@ export async function upsertProfile(profile: UserProfile): Promise<{ error?: str
         updated_at:     new Date().toISOString(),
       });
 
-    if (error) {
-      if (isMissingColumnError(error)) {
-        // child_birthday or child_name column missing — retry with only base columns
-        const { error: e2 } = await supabase
+    if (!e1) return {}; // ✓ full sync succeeded
+
+    console.warn('[upsertProfile] tier-1 error:', e1.code, e1.message);
+
+    // Tier 2: child_birthday / child_name column missing → drop those columns
+    if (isMissingColumnError(e1)) {
+      const { error: e2 } = await supabase
+        .from('profiles')
+        .upsert({
+          id:           user.id,
+          display_name: profile.display_name,
+          role:         profile.role,
+          updated_at:   new Date().toISOString(),
+        });
+
+      if (!e2) return {}; // ✓ partial sync succeeded
+      console.warn('[upsertProfile] tier-2 error:', e2.code, e2.message);
+
+      // Tier 3: updated_at missing too → bare minimum
+      if (isMissingColumnError(e2)) {
+        const { error: e3 } = await supabase
           .from('profiles')
-          .upsert({
-            id:           user.id,
-            display_name: profile.display_name,
-            role:         profile.role,
-            updated_at:   new Date().toISOString(),
-          });
-        // 42P01 / PGRST205 = table doesn't exist yet — localStorage already saved it
-        if (e2 && e2.code !== 'PGRST205' && e2.code !== '42P01') {
-          return { error: e2.message };
-        }
-      } else if (error.code !== 'PGRST205' && error.code !== '42P01') {
-        return { error: error.message };
+          .upsert({ id: user.id, display_name: profile.display_name, role: profile.role });
+
+        if (!e3) return {}; // ✓ minimal sync succeeded
+        console.warn('[upsertProfile] tier-3 error:', e3.code, e3.message);
       }
     }
-  } catch {
-    // Network error — localStorage already saved it, so not fatal
+
+    // Table missing entirely — localStorage already captured the data, not fatal
+    // Any other error — also non-fatal since localStorage was saved successfully
+  } catch (err) {
+    console.warn('[upsertProfile] network error:', err);
   }
 
-  return {};
+  return {}; // localStorage save was successful — report success to the UI
 }
 
 // ── saveLog (logs table) ──────────────────────────────────────
@@ -804,8 +819,10 @@ export interface AIInsights {
 /**
  * Computes full years from a YYYY-MM-DD birthday string to today (local time).
  * Returns undefined if the birthday string is empty or invalid.
+ * Exported so components can compute age directly from the profile birthday
+ * without waiting for getAIInsights() to resolve.
  */
-function computeAgeYears(birthday: string | undefined): number | undefined {
+export function calculateChildAge(birthday: string | undefined): number | undefined {
   if (!birthday) return undefined;
   const bday = new Date(`${birthday}T12:00:00`); // noon avoids tz edge cases
   if (isNaN(bday.getTime())) return undefined;
@@ -890,7 +907,7 @@ export async function getAIInsights(): Promise<AIInsights> {
   const BIRTHDAY_FALLBACK = '2019-11-01';
   const childProfile = await getProfile().catch(() => null);
   const resolvedBirthday = childProfile?.child_birthday || BIRTHDAY_FALLBACK;
-  const childAgeYears = computeAgeYears(resolvedBirthday);
+  const childAgeYears = calculateChildAge(resolvedBirthday);
   const devStage = childAgeYears !== undefined ? getDevStage(childAgeYears) : undefined;
 
   // One query: 30 days of mood + note + timestamp, ordered oldest first

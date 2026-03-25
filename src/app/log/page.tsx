@@ -27,6 +27,7 @@ import {
   getTodayMetadata,
   getAIInsights,
   getProfile,
+  calculateChildAge,
 } from "@/lib/mood-log";
 import type { DayMood, LogEntry, LogMetadata, AIInsights, ForecastInsight } from "@/lib/mood-log";
 import { generateDailyForecast } from "@/lib/predictor";
@@ -218,8 +219,9 @@ function LogPageInner() {
   const [logsLoading, setLogsLoading] = useState(true);
   const [todayMetadata, setTodayMetadata] = useState<LogMetadata | null>(null);
   const [aiData, setAiData] = useState<AIInsights | null>(null);
-  // Child name from user's profile — refreshes instantly after Settings save
+  // Child name & birthday from user's profile — refreshes instantly after Settings save
   const [profileChildName, setProfileChildName] = useState<string | null>(null);
+  const [profileChildBirthday, setProfileChildBirthday] = useState<string | undefined>(undefined);
   const [weeklyData, setWeeklyData] = useState<DayMood[] | null>(null);
   const [loggedToday, setLoggedToday] = useState<Map<string, number>>(
     new Map(),
@@ -234,6 +236,10 @@ function LogPageInner() {
   const displayChildName: string | null =
     profileChildName || selectedChild?.name || null;
   const childName = displayChildName ?? "your child";
+  // Age computed directly from profile birthday — reactive to Settings changes,
+  // no dependency on getAIInsights(). calculateChildAge returns (CurrentYear - BirthYear)
+  // adjusted for whether the birthday has passed this year.
+  const childAge: number | undefined = calculateChildAge(profileChildBirthday);
 
   // ── Load children on mount ────────────────────────────────
   useEffect(() => {
@@ -282,16 +288,19 @@ function LogPageInner() {
     getAIInsights().then(setAiData).catch(() => null);
   }, [refreshLogs]);
 
-  // Load child name from profile; re-read whenever Settings saves (custom event)
+  // Load child name + birthday from profile; re-read whenever Settings saves (custom event)
   useEffect(() => {
-    function loadName() {
+    function loadProfile() {
       getProfile()
-        .then((p) => setProfileChildName(p.child_name || null))
+        .then((p) => {
+          setProfileChildName(p.child_name || null);
+          setProfileChildBirthday(p.child_birthday || undefined);
+        })
         .catch(() => null);
     }
-    loadName();
-    window.addEventListener('linksteps:profile_updated', loadName);
-    return () => window.removeEventListener('linksteps:profile_updated', loadName);
+    loadProfile();
+    window.addEventListener('linksteps:profile_updated', loadProfile);
+    return () => window.removeEventListener('linksteps:profile_updated', loadProfile);
   }, []);
 
   // ── One-Tap Quick Log ─────────────────────────────────────
@@ -534,7 +543,7 @@ function LogPageInner() {
           )}
 
           {/* ── Daily Slogan — always visible above the input card ── */}
-          <DailySloganCard ageYears={aiData?.childAgeYears} />
+          <DailySloganCard ageYears={childAge} />
 
           {/* key changes on each successful save — remounts MoodCard, clearing
               selected mood + note without any prop drilling */}

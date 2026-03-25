@@ -9,22 +9,6 @@ import AppNav from "@/components/ui/app-nav";
 
 // ── Age display helper ───────────────────────────────────────
 
-/** Returns "7 years 3 months old" style label. */
-function formatAge(birthday: string): string {
-  const bday = new Date(`${birthday}T12:00:00`);
-  if (isNaN(bday.getTime())) return "";
-  const today = new Date();
-  let years = today.getFullYear() - bday.getFullYear();
-  let months = today.getMonth() - bday.getMonth();
-  if (today.getDate() < bday.getDate()) months--;
-  if (months < 0) { years--; months += 12; }
-  if (years < 0) return "";
-  const yPart = years > 0 ? `${years} year${years !== 1 ? "s" : ""}` : "";
-  const mPart = months > 0 ? `${months} month${months !== 1 ? "s" : ""}` : "";
-  const age = [yPart, mPart].filter(Boolean).join(" ");
-  return age ? `${age} old` : "Less than a month old";
-}
-
 /** Maps age to a short developmental stage label shown below the birthday. */
 function devStageLabel(birthday: string): string {
   const bday = new Date(`${birthday}T12:00:00`);
@@ -101,27 +85,47 @@ function SettingsInner() {
     child_name: "",
     child_birthday: undefined,
   });
-  const [loading, setLoading]   = useState(true);
-  const [saving, setSaving]     = useState(false);
-  const [toast, setToast]       = useState<string | null>(null);
-  const [toastOk, setToastOk]   = useState(true);
+  const [loading, setLoading]       = useState(true);
+  const [saving, setSaving]         = useState(false);
+  const [toast, setToast]           = useState<string | null>(null);
+  const [toastOk, setToastOk]       = useState(true);
+  const [birthdayError, setBirthdayError] = useState<string | null>(null);
   // Per-role "Copied!" state for invite buttons
   const [copiedRole, setCopiedRole] = useState<UserProfile["role"] | null>(null);
 
-  // Load profile on mount
+  // Load profile on mount; sanitize birthday so corrupt values (e.g. "0019-…")
+  // from a previous session are cleared rather than pre-filling the input.
   useEffect(() => {
     getProfile().then((p) => {
-      setProfile((prev) => ({
+      const rawBirthday = p.child_birthday;
+      let safeBirthday: string | undefined = undefined;
+      if (rawBirthday) {
+        const y = parseInt(rawBirthday.slice(0, 4), 10);
+        if (!isNaN(y) && y >= 1000) safeBirthday = rawBirthday;
+      }
+      setProfile({
         ...p,
+        child_birthday: safeBirthday,
         // If arriving via invite link, honour the locked role
         role: isRoleLocked ? inviteRole! : p.role,
-      }));
+      });
       setLoading(false);
     });
   }, [isRoleLocked, inviteRole]);
 
   async function handleSave() {
     if (!profile.display_name.trim()) return;
+
+    // ── Birthday validation (save-time only, never during typing) ──
+    setBirthdayError(null);
+    if (profile.child_birthday) {
+      const y = parseInt(profile.child_birthday.slice(0, 4), 10);
+      if (isNaN(y) || y < 1000 || y < currentYear - MAX_AGE || y > currentYear) {
+        setBirthdayError(`Please enter a valid birthday (ages 0–${MAX_AGE} supported).`);
+        return;
+      }
+    }
+
     setSaving(true);
     const result = await upsertProfile(profile);
     setSaving(false);
@@ -316,42 +320,27 @@ function SettingsInner() {
               min={minDate}
               max={maxDate}
               onChange={(e) => {
-                const val = e.target.value || undefined;
-                if (val) {
-                  const year = parseInt(val.slice(0, 4), 10);
-                  // Require a proper 4-digit year (≥ 1000) so that Chrome's
-                  // intermediate padded values like "0002", "0019", "0201"
-                  // never reach state — only the final complete year does.
-                  if (
-                    isNaN(year) ||
-                    year < 1000 ||
-                    year < currentYear - MAX_AGE ||
-                    year > currentYear
-                  ) return;
-                }
-                setProfile({ ...profile, child_birthday: val });
+                // No validation here — user types freely.
+                // Validation happens only when Save Changes is clicked.
+                setBirthdayError(null);
+                setProfile({ ...profile, child_birthday: e.target.value || undefined });
               }}
-              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-800 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100 transition-colors"
+              className={`w-full rounded-2xl border bg-slate-50 px-4 py-3 text-sm text-slate-800 focus:outline-none focus:ring-2 transition-colors ${
+                birthdayError
+                  ? "border-rose-300 focus:border-rose-400 focus:ring-rose-100"
+                  : "border-slate-200 focus:border-sky-400 focus:ring-sky-100"
+              }`}
             />
-            {profile.child_birthday && (() => {
-              const year = parseInt(profile.child_birthday.slice(0, 4), 10);
-              const outOfRange =
-                isNaN(year) ||
-                year < 1000 ||
-                year < currentYear - MAX_AGE ||
-                year > currentYear;
-              if (outOfRange) {
-                return (
-                  <p className="text-xs text-rose-500">
-                    LinkSteps currently supports ages 0–{MAX_AGE}.
-                  </p>
-                );
-              }
-              return (
-                <p className="text-xs text-slate-400">
-                  {devStageLabel(profile.child_birthday)}
-                </p>
-              );
+            {birthdayError && (
+              <p className="text-xs text-rose-500">{birthdayError}</p>
+            )}
+            {!birthdayError && profile.child_birthday && (() => {
+              const y = parseInt(profile.child_birthday.slice(0, 4), 10);
+              if (isNaN(y) || y < 1000) return null;
+              const label = devStageLabel(profile.child_birthday);
+              return label ? (
+                <p className="text-xs text-slate-400">{label}</p>
+              ) : null;
             })()}
           </div>
         </section>

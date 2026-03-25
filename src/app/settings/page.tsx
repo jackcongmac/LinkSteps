@@ -65,6 +65,12 @@ function SeatDots({ used, total }: { used: number; total: number }) {
 // Supports ages 0–22. Both bounds auto-advance every calendar year.
 const MAX_AGE = 22;
 
+// ── Owner bypass ─────────────────────────────────────────────
+// Emergency fallback: if the DB migration has not yet run (is_owner column
+// missing) the account with this email is always treated as owner.
+// Replace with your Supabase login email.
+const OWNER_EMAIL = "jackcongus@gmail.com";
+
 function SettingsInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -90,12 +96,20 @@ function SettingsInner() {
   const [toast, setToast]           = useState<string | null>(null);
   const [toastOk, setToastOk]       = useState(true);
   const [birthdayError, setBirthdayError] = useState<string | null>(null);
+  const [userEmail, setUserEmail]   = useState<string | null>(null);
   // Per-role "Copied!" state for invite buttons
   const [copiedRole, setCopiedRole] = useState<UserProfile["role"] | null>(null);
 
-  // Load profile on mount; sanitize birthday so corrupt values (e.g. "0019-…")
-  // from a previous session are cleared rather than pre-filling the input.
+  // Load profile + auth email on mount.
+  // Birthday is sanitised: corrupt values (e.g. "0019-…") are cleared.
   useEffect(() => {
+    import("@/lib/supabase").then(({ createClient }) => {
+      const supabase = createClient();
+      supabase.auth.getUser().then(({ data: { user } }) => {
+        setUserEmail(user?.email ?? null);
+      });
+    });
+
     getProfile().then((p) => {
       const rawBirthday = p.child_birthday;
       let safeBirthday: string | undefined = undefined;
@@ -113,8 +127,8 @@ function SettingsInner() {
     });
   }, [isRoleLocked, inviteRole]);
 
-  // Derived once per render — never trust client-supplied is_owner in write paths.
-  const isOwner = profile.is_owner === true;
+  // Owner = DB flag OR email bypass (covers the period before the migration runs).
+  const isOwner = profile.is_owner === true || userEmail === OWNER_EMAIL;
 
   async function handleSave() {
     if (!profile.display_name.trim()) return;

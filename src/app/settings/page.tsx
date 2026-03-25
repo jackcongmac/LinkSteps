@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft, CheckCircle2, Copy, Check, Lock } from "lucide-react";
-import { getProfile, upsertProfile } from "@/lib/mood-log";
+import { getProfile, upsertProfile, getFirstName } from "@/lib/mood-log";
 import type { UserProfile } from "@/lib/mood-log";
 import AppNav from "@/components/ui/app-nav";
 
@@ -142,8 +142,8 @@ function SettingsInner() {
   const handleInvite = useCallback(async (role: UserProfile["role"]) => {
     const url  = `${window.location.origin}/settings?role=${role}`;
     const roleLabel = ROLES.find((r) => r.value === role)?.label ?? role;
-    const childName  = profile.child_name?.trim()  || "your child";
-    const inviterName = profile.display_name?.trim() || "Someone";
+    const childName   = getFirstName(profile.child_name)   || "your child";
+    const inviterName = getFirstName(profile.display_name) || "Someone";
 
     // Share text intentionally omits any numeric age — privacy-first.
     const shareData = {

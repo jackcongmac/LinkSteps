@@ -1,6 +1,7 @@
 "use client";
 
 import { Sun, Smile, Cloud, CloudRain, Zap } from "lucide-react";
+import { getFirstName } from "@/lib/mood-log";
 import type { LogEntry } from "@/lib/mood-log";
 
 // ── Mood config ───────────────────────────────────────────────
@@ -172,7 +173,7 @@ export default function RecentLogs({ entries, loading = false }: RecentLogsProps
                                : entry?.author_role === 'therapist' ? '🧩'
                                : '🏠'}
                             </span>{' '}
-                            by {entry.author_name}
+                            by {getFirstName(entry.author_name) ?? entry.author_name}
                           </p>
                         )}
                       </div>

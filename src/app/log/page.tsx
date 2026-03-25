@@ -28,6 +28,7 @@ import {
   getAIInsights,
   getProfile,
   calculateChildAge,
+  getFirstName,
 } from "@/lib/mood-log";
 import type { DayMood, LogEntry, LogMetadata, AIInsights, ForecastInsight } from "@/lib/mood-log";
 import { generateDailyForecast } from "@/lib/predictor";
@@ -232,9 +233,9 @@ function LogPageInner() {
   } | null>(null);
 
   const selectedChild = children.find((c) => c.id === selectedId) ?? null;
-  // Display name: Settings profile > children table > generic fallback
+  // First name only — "Ethan Cong" → "Ethan", keeps UI natural and private
   const displayChildName: string | null =
-    profileChildName || selectedChild?.name || null;
+    getFirstName(profileChildName || selectedChild?.name);
   const childName = displayChildName ?? "your child";
   // Age computed directly from profile birthday — reactive to Settings changes,
   // no dependency on getAIInsights(). calculateChildAge returns (CurrentYear - BirthYear)

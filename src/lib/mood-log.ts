@@ -10,6 +10,17 @@
 import { createClient } from '@/lib/supabase';
 import type { MoodLevel, MoodIconName } from '@/components/ui/mood-picker';
 
+/**
+ * Returns the first token of a name string (everything before the first space).
+ * "Ethan Cong" → "Ethan" · "Jack" → "Jack" · null/empty → null
+ * Used everywhere a first name is displayed to keep the UI natural and private.
+ */
+export function getFirstName(name: string | null | undefined): string | null {
+  const trimmed = name?.trim();
+  if (!trimmed) return null;
+  return trimmed.split(/\s+/)[0];
+}
+
 // ── Shared types ─────────────────────────────────────────────
 
 /** One day in the 7-day trend view. `level` is null when no mood was logged. */

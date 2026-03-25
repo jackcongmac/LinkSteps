@@ -675,17 +675,20 @@ const DEMO_LOGS: LogEntry[] = [
 // ── Daily Slogan card ─────────────────────────────────────────────
 //
 // Shows a curated spectrum-informed slogan above the MoodCard every day.
-// Text is age-aware: "6-year-olds" when we know the age, "young children" as fallback.
+// ageYears is used internally to select the right slogan tier but is
+// never displayed — age is private. Text always reads "at this stage".
 
 function DailySloganCard({ ageYears }: { ageYears?: number }) {
-  const ageLabel = ageYears !== undefined ? `${ageYears}-year-olds` : "young children";
+  // ageYears drives slogan selection logic (future expansion) but is
+  // intentionally kept off-screen. No numeric age is shown to the user.
+  void ageYears;
   return (
     <div className="rounded-2xl border-l-4 border-l-sky-200 bg-white px-4 py-3 shadow-sm">
       <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 mb-1">
         Today&apos;s Reminder
       </p>
       <p className="text-sm text-slate-600 leading-snug">
-        Structured routines help {ageLabel} manage transitions.
+        Structured routines help manage transitions at this stage.
       </p>
     </div>
   );

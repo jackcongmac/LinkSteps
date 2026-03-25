@@ -314,14 +314,9 @@ function SettingsInner() {
                 );
               }
               return (
-                <div className="space-y-0.5">
-                  <p className="text-xs font-medium text-sky-600">
-                    {formatAge(profile.child_birthday)}
-                  </p>
-                  <p className="text-xs text-slate-400">
-                    {devStageLabel(profile.child_birthday)}
-                  </p>
-                </div>
+                <p className="text-xs text-slate-400">
+                  {devStageLabel(profile.child_birthday)}
+                </p>
               );
             })()}
           </div>

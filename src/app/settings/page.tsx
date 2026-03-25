@@ -135,13 +135,47 @@ function SettingsInner() {
     setTimeout(() => setToast(null), 2500);
   }
 
-  const handleCopyInvite = useCallback((role: UserProfile["role"]) => {
-    const url = `${window.location.origin}/settings?role=${role}`;
-    navigator.clipboard.writeText(url).then(() => {
-      setCopiedRole(role);
-      setTimeout(() => setCopiedRole(null), 2000);
-    });
-  }, []);
+  const handleInvite = useCallback(async (role: UserProfile["role"]) => {
+    const url  = `${window.location.origin}/settings?role=${role}`;
+    const roleLabel = ROLES.find((r) => r.value === role)?.label ?? role;
+    const childName  = profile.child_name?.trim()  || "your child";
+    const inviterName = profile.display_name?.trim() || "Someone";
+
+    // Share text intentionally omits any numeric age — privacy-first.
+    const shareData = {
+      title: `Join ${childName}'s Support Team on LinkSteps`,
+      text:  `${inviterName} invites you to join as a ${roleLabel}. Click to connect:`,
+      url,
+    };
+
+    // ── Web Share API (mobile / modern browsers) ──────────────
+    if (typeof navigator.share === "function" && navigator.canShare?.(shareData)) {
+      try {
+        await navigator.share(shareData);
+        // Share sheet opened — button feedback handled by the OS; no toast needed.
+        setCopiedRole(role);
+        setTimeout(() => setCopiedRole(null), 2000);
+        return;
+      } catch (err) {
+        // AbortError = user dismissed the sheet — silent.
+        // Any other error falls through to clipboard fallback.
+        if (err instanceof Error && err.name === "AbortError") return;
+      }
+    }
+
+    // ── Clipboard fallback (desktop / unsupported browsers) ───
+    try {
+      await navigator.clipboard.writeText(url);
+    } catch {
+      // Clipboard also unavailable — nothing we can do, skip toast.
+      return;
+    }
+    setCopiedRole(role);
+    setTimeout(() => setCopiedRole(null), 2000);
+    setToastOk(true);
+    setToast("Link copied! You can now paste it to WeChat.");
+    setTimeout(() => setToast(null), 3000);
+  }, [profile.child_name, profile.display_name]);
 
   // Mock used-seat counts: current user counts as 1 in their own role slot.
   // Replace with real DB query once profiles table is live.
@@ -351,7 +385,7 @@ function SettingsInner() {
                     {/* Invite button */}
                     <button
                       type="button"
-                      onClick={() => handleCopyInvite(role)}
+                      onClick={() => void handleInvite(role)}
                       disabled={isFull}
                       aria-label={`Copy invite link for ${label}`}
                       className={`flex shrink-0 items-center gap-1.5 rounded-2xl px-3 py-1.5 text-xs font-medium transition-all active:scale-95 ${

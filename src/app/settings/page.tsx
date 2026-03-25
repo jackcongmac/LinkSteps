@@ -283,11 +283,17 @@ function SettingsInner() {
               max={maxDate}
               onChange={(e) => {
                 const val = e.target.value || undefined;
-                // Out-of-range guard: browser enforces min/max natively, but
-                // validate here too in case of manual entry or paste.
                 if (val) {
                   const year = parseInt(val.slice(0, 4), 10);
-                  if (year < currentYear - MAX_AGE || year > currentYear) return;
+                  // Require a proper 4-digit year (≥ 1000) so that Chrome's
+                  // intermediate padded values like "0002", "0019", "0201"
+                  // never reach state — only the final complete year does.
+                  if (
+                    isNaN(year) ||
+                    year < 1000 ||
+                    year < currentYear - MAX_AGE ||
+                    year > currentYear
+                  ) return;
                 }
                 setProfile({ ...profile, child_birthday: val });
               }}
@@ -295,7 +301,11 @@ function SettingsInner() {
             />
             {profile.child_birthday && (() => {
               const year = parseInt(profile.child_birthday.slice(0, 4), 10);
-              const outOfRange = year < currentYear - MAX_AGE || year > currentYear;
+              const outOfRange =
+                isNaN(year) ||
+                year < 1000 ||
+                year < currentYear - MAX_AGE ||
+                year > currentYear;
               if (outOfRange) {
                 return (
                   <p className="text-xs text-rose-500">

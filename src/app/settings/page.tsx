@@ -99,8 +99,9 @@ function SettingsInner() {
   const [userEmail, setUserEmail]   = useState<string | null>(null);
   // Per-role "Copied!" state for invite buttons
   const [copiedRole, setCopiedRole] = useState<UserProfile["role"] | null>(null);
-  // Per-role "Grant Admin Power" toggle — when on, invite URL includes ?grant=1
-  const [adminGrants, setAdminGrants] = useState<Record<string, boolean>>({});
+  // Popover: which role's config panel is open (parent only), + checkbox state
+  const [popoverRole, setPopoverRole] = useState<UserProfile["role"] | null>(null);
+  const [grantAdminInPopover, setGrantAdminInPopover] = useState(true);
 
   // Load profile + auth email on mount.
   // Birthday is sanitised: corrupt values (e.g. "0019-…") are cleared.
@@ -176,8 +177,7 @@ function SettingsInner() {
     setTimeout(() => setToast(null), 2500);
   }
 
-  const handleInvite = useCallback(async (role: UserProfile["role"]) => {
-    const grantAdmin = adminGrants[role] === true;
+  const handleInvite = useCallback(async (role: UserProfile["role"], grantAdmin = false) => {
     const url = `${window.location.origin}/settings?role=${role}${grantAdmin ? "&grant=1" : ""}`;
     const roleLabel = ROLES.find((r) => r.value === role)?.label ?? role;
     const childName   = getFirstName(profile.child_name)   || "your child";
@@ -217,7 +217,7 @@ function SettingsInner() {
     setToastOk(true);
     setToast("Link copied! You can now paste it to WeChat.");
     setTimeout(() => setToast(null), 3000);
-  }, [profile.child_name, profile.display_name, adminGrants]);
+  }, [profile.child_name, profile.display_name]);
 
   // Mock used-seat counts: current user counts as 1 in their own role slot.
   // Replace with real DB query once profiles table is live.
@@ -400,27 +400,36 @@ function SettingsInner() {
 
         {/* ── Team Seats Section (owner-only) ──────────────── */}
         {isOwner && (
-          <section className="rounded-3xl bg-white px-5 py-5 shadow-sm space-y-4">
-            <h2 className="text-xs font-semibold uppercase tracking-widest text-slate-400">
-              Team Seats
-            </h2>
+          <>
+            {/* Backdrop — dismisses any open popover on outside click */}
+            {popoverRole && (
+              <div
+                className="fixed inset-0 z-10"
+                onClick={() => setPopoverRole(null)}
+                aria-hidden="true"
+              />
+            )}
 
-            <div className="space-y-3">
-              {QUOTAS.map(({ role, icon, label, total }) => {
-                const used = usedCount(role);
-                const isFull = used >= total;
-                const isCopied = copiedRole === role;
-                return (
-                  <div key={role} className="flex flex-col gap-2">
-                    <div className="flex items-center gap-3">
+            <section className="rounded-3xl bg-white px-5 py-5 shadow-sm space-y-4">
+              <h2 className="text-xs font-semibold uppercase tracking-widest text-slate-400">
+                Team Seats
+              </h2>
+
+              <div className="space-y-3">
+                {QUOTAS.map(({ role, icon, label, total }) => {
+                  const used = usedCount(role);
+                  const isFull = used >= total;
+                  const isCopied = copiedRole === role;
+                  const isParent = role === "parent";
+
+                  return (
+                    <div key={role} className="relative flex items-center gap-3">
                       {/* Role label + dots */}
                       <div className="flex min-w-0 flex-1 flex-col gap-1">
                         <div className="flex items-center gap-1.5">
                           <span className="text-sm" aria-hidden="true">{icon}</span>
                           <span className="text-sm font-medium text-slate-700">{label}</span>
-                          <span className="text-xs text-slate-400">
-                            {used}/{total}
-                          </span>
+                          <span className="text-xs text-slate-400">{used}/{total}</span>
                         </div>
                         <SeatDots used={used} total={total} />
                       </div>
@@ -428,9 +437,19 @@ function SettingsInner() {
                       {/* Invite button */}
                       <button
                         type="button"
-                        onClick={() => void handleInvite(role)}
                         disabled={isFull}
-                        aria-label={`Copy invite link for ${label}`}
+                        aria-label={`Invite ${label}`}
+                        onClick={() => {
+                          if (isFull) return;
+                          if (isParent) {
+                            // Parent: open config popover first
+                            setPopoverRole(popoverRole === "parent" ? null : "parent");
+                            setGrantAdminInPopover(true);
+                          } else {
+                            // Teacher / Therapist: share directly, no admin rights
+                            void handleInvite(role, false);
+                          }
+                        }}
                         className={`flex shrink-0 items-center gap-1.5 rounded-2xl px-3 py-1.5 text-xs font-medium transition-all active:scale-95 ${
                           isFull
                             ? "bg-slate-100 text-slate-400 cursor-not-allowed"
@@ -440,47 +459,54 @@ function SettingsInner() {
                         }`}
                       >
                         {isCopied ? (
-                          <>
-                            <Check className="h-3 w-3" aria-hidden="true" />
-                            Copied!
-                          </>
+                          <><Check className="h-3 w-3" aria-hidden="true" />Copied!</>
                         ) : (
-                          <>
-                            <Copy className="h-3 w-3" aria-hidden="true" />
-                            {isFull ? "Full" : "Invite"}
-                          </>
+                          <><Copy className="h-3 w-3" aria-hidden="true" />{isFull ? "Full" : "Invite"}</>
                         )}
                       </button>
+
+                      {/* Admin config popover — parent only */}
+                      {isParent && popoverRole === "parent" && (
+                        <div
+                          className="absolute right-0 top-full z-20 mt-2 w-56 rounded-2xl border border-slate-100 bg-white p-4 shadow-lg"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <p className="mb-3 text-xs font-semibold text-slate-700">
+                            Grant administrative access?
+                          </p>
+                          <label className="mb-4 flex cursor-pointer items-center gap-2">
+                            <input
+                              type="checkbox"
+                              checked={grantAdminInPopover}
+                              onChange={(e) => setGrantAdminInPopover(e.target.checked)}
+                              className="h-3.5 w-3.5 rounded accent-sky-500"
+                            />
+                            <span className="text-[11px] text-slate-500">
+                              Allow editing child info &amp; inviting others
+                            </span>
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              void handleInvite("parent", grantAdminInPopover);
+                              setPopoverRole(null);
+                            }}
+                            className="w-full rounded-xl bg-sky-500 py-2 text-xs font-semibold text-white shadow-sm active:scale-95 transition-transform"
+                          >
+                            Create Link
+                          </button>
+                        </div>
+                      )}
                     </div>
+                  );
+                })}
+              </div>
 
-                    {/* Grant Admin Power toggle — only shown when seat is not full */}
-                    {!isFull && (
-                      <label className="flex cursor-pointer items-center gap-2 pl-1">
-                        <input
-                          type="checkbox"
-                          checked={adminGrants[role] === true}
-                          onChange={(e) =>
-                            setAdminGrants((prev) => ({ ...prev, [role]: e.target.checked }))
-                          }
-                          className="h-3.5 w-3.5 rounded accent-sky-500"
-                        />
-                        <span className="text-[11px] text-slate-400">
-                          Grant admin power
-                          {adminGrants[role] && (
-                            <span className="ml-1 font-medium text-amber-500">· link includes admin rights</span>
-                          )}
-                        </span>
-                      </label>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-
-            <p className="text-[11px] text-slate-400 leading-relaxed">
-              Share the invite link. The recipient&apos;s role will be pre-set and locked when they sign up.
-            </p>
-          </section>
+              <p className="text-[11px] text-slate-400 leading-relaxed">
+                Share the invite link. The recipient&apos;s role will be pre-set and locked when they sign up.
+              </p>
+            </section>
+          </>
         )}
 
         {/* ── Toast ───────────────────────────────────────── */}

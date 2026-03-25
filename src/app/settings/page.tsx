@@ -113,12 +113,15 @@ function SettingsInner() {
     });
   }, [isRoleLocked, inviteRole]);
 
+  // Derived once per render — never trust client-supplied is_owner in write paths.
+  const isOwner = profile.is_owner === true;
+
   async function handleSave() {
     if (!profile.display_name.trim()) return;
 
-    // ── Birthday validation (save-time only, never during typing) ──
+    // ── Birthday validation: owner-only field, skip for non-owners ──
     setBirthdayError(null);
-    if (profile.child_birthday) {
+    if (isOwner && profile.child_birthday) {
       const y = parseInt(profile.child_birthday.slice(0, 4), 10);
       if (isNaN(y) || y < 1000 || y < currentYear - MAX_AGE || y > currentYear) {
         setBirthdayError(`Please enter a valid birthday (ages 0–${MAX_AGE} supported).`);
@@ -126,8 +129,15 @@ function SettingsInner() {
       }
     }
 
+    // Non-owners only update their own identity (display_name, role).
+    // Child fields are read-only for them — pass unchanged values so upsert
+    // is effectively a no-op on child_name / child_birthday.
+    const payload: UserProfile = isOwner
+      ? profile
+      : { display_name: profile.display_name, role: profile.role, child_name: profile.child_name, child_birthday: profile.child_birthday, is_owner: false };
+
     setSaving(true);
-    const result = await upsertProfile(profile);
+    const result = await upsertProfile(payload);
     setSaving(false);
     if (result.error) {
       setToastOk(false);
@@ -289,9 +299,17 @@ function SettingsInner() {
 
         {/* ── Kid's Info Section ───────────────────────────── */}
         <section className="rounded-3xl bg-white px-5 py-5 shadow-sm space-y-5">
-          <h2 className="text-xs font-semibold uppercase tracking-widest text-slate-400">
-            Kid&apos;s Info
-          </h2>
+          <div className="flex items-center justify-between">
+            <h2 className="text-xs font-semibold uppercase tracking-widest text-slate-400">
+              Kid&apos;s Info
+            </h2>
+            {!isOwner && (
+              <span className="flex items-center gap-1 text-[10px] text-slate-400">
+                <Lock className="h-3 w-3" aria-hidden="true" />
+                View only
+              </span>
+            )}
+          </div>
 
           {/* Child's Name */}
           <div className="space-y-1.5">
@@ -302,9 +320,14 @@ function SettingsInner() {
               id="child-name"
               type="text"
               value={profile.child_name}
-              onChange={(e) => setProfile({ ...profile, child_name: e.target.value })}
-              placeholder="e.g. Ethan"
-              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-800 placeholder:text-slate-400 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100 transition-colors"
+              readOnly={!isOwner}
+              onChange={(e) => isOwner && setProfile({ ...profile, child_name: e.target.value })}
+              placeholder={isOwner ? "e.g. Ethan" : "—"}
+              className={`w-full rounded-2xl border px-4 py-3 text-sm text-slate-800 placeholder:text-slate-400 transition-colors ${
+                isOwner
+                  ? "bg-slate-50 border-slate-200 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100"
+                  : "bg-slate-100 border-slate-200 cursor-not-allowed text-slate-500 outline-none"
+              }`}
             />
           </div>
 
@@ -317,24 +340,26 @@ function SettingsInner() {
               id="child-birthday"
               type="date"
               value={profile.child_birthday ?? ""}
-              min={minDate}
-              max={maxDate}
+              readOnly={!isOwner}
+              min={isOwner ? minDate : undefined}
+              max={isOwner ? maxDate : undefined}
               onChange={(e) => {
-                // No validation here — user types freely.
-                // Validation happens only when Save Changes is clicked.
+                if (!isOwner) return;
                 setBirthdayError(null);
                 setProfile({ ...profile, child_birthday: e.target.value || undefined });
               }}
-              className={`w-full rounded-2xl border bg-slate-50 px-4 py-3 text-sm text-slate-800 focus:outline-none focus:ring-2 transition-colors ${
-                birthdayError
-                  ? "border-rose-300 focus:border-rose-400 focus:ring-rose-100"
-                  : "border-slate-200 focus:border-sky-400 focus:ring-sky-100"
+              className={`w-full rounded-2xl border px-4 py-3 text-sm text-slate-800 transition-colors ${
+                !isOwner
+                  ? "bg-slate-100 border-slate-200 cursor-not-allowed text-slate-500 outline-none"
+                  : birthdayError
+                  ? "bg-slate-50 border-rose-300 focus:border-rose-400 focus:outline-none focus:ring-2 focus:ring-rose-100"
+                  : "bg-slate-50 border-slate-200 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100"
               }`}
             />
             {birthdayError && (
               <p className="text-xs text-rose-500">{birthdayError}</p>
             )}
-            {!birthdayError && profile.child_birthday && (() => {
+            {isOwner && !birthdayError && profile.child_birthday && (() => {
               const y = parseInt(profile.child_birthday.slice(0, 4), 10);
               if (isNaN(y) || y < 1000) return null;
               const label = devStageLabel(profile.child_birthday);
@@ -345,8 +370,8 @@ function SettingsInner() {
           </div>
         </section>
 
-        {/* ── Team Seats Section (always visible) ─────────── */}
-        {(
+        {/* ── Team Seats Section (owner-only) ──────────────── */}
+        {isOwner && (
           <section className="rounded-3xl bg-white px-5 py-5 shadow-sm space-y-4">
             <h2 className="text-xs font-semibold uppercase tracking-widest text-slate-400">
               Team Seats

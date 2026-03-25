@@ -168,6 +168,12 @@ export interface UserProfile {
   child_name: string;
   /** Child's date of birth in YYYY-MM-DD (local). Drives age-aware AI hints. */
   child_birthday?: string;
+  /**
+   * True only for the account owner (the person who created the team).
+   * Never written by upsertProfile — set in DB only via a privileged migration.
+   * Controls whether the Settings UI shows editable child fields and Invite buttons.
+   */
+  is_owner?: boolean;
 }
 
 const PROFILE_STORAGE_KEY = 'linksteps_profile';
@@ -206,12 +212,18 @@ export async function getProfile(): Promise<UserProfile> {
     if (user) {
       const { data } = await supabase
         .from('profiles')
-        .select('display_name, role, child_name, child_birthday')
+        .select('display_name, role, child_name, child_birthday, is_owner')
         .eq('id', user.id)
         .single();
 
       if (data) {
-        const p = data as { display_name: string; role: string; child_name: string | null; child_birthday: string | null };
+        const p = data as {
+          display_name: string;
+          role: string;
+          child_name: string | null;
+          child_birthday: string | null;
+          is_owner: boolean | null;
+        };
         const profile: UserProfile = {
           display_name: p.display_name ?? '',
           role: (['parent', 'teacher', 'therapist'] as const).includes(p.role as UserProfile['role'])
@@ -219,6 +231,7 @@ export async function getProfile(): Promise<UserProfile> {
             : 'parent',
           child_name:     p.child_name     ?? '',
           child_birthday: p.child_birthday ?? undefined,
+          is_owner:       p.is_owner       ?? false,
         };
         writeLocalProfile(profile); // keep localStorage in sync
         return profile;

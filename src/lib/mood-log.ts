@@ -174,6 +174,8 @@ export interface UserProfile {
    * Controls whether the Settings UI shows editable child fields and Invite buttons.
    */
   is_owner?: boolean;
+  /** Free-text relation or title, e.g. "Father", "Mother", "Primary Teacher". */
+  relation_title?: string;
 }
 
 const PROFILE_STORAGE_KEY = 'linksteps_profile';
@@ -212,7 +214,7 @@ export async function getProfile(): Promise<UserProfile> {
     if (user) {
       const { data } = await supabase
         .from('profiles')
-        .select('display_name, role, child_name, child_birthday, is_owner')
+        .select('display_name, role, child_name, child_birthday, is_owner, relation_title')
         .eq('id', user.id)
         .single();
 
@@ -223,6 +225,7 @@ export async function getProfile(): Promise<UserProfile> {
           child_name: string | null;
           child_birthday: string | null;
           is_owner: boolean | null;
+          relation_title: string | null;
         };
         const profile: UserProfile = {
           display_name: p.display_name ?? '',
@@ -232,6 +235,7 @@ export async function getProfile(): Promise<UserProfile> {
           child_name:     p.child_name     ?? '',
           child_birthday: p.child_birthday ?? undefined,
           is_owner:       p.is_owner       ?? false,
+          relation_title: p.relation_title ?? undefined,
         };
         writeLocalProfile(profile); // keep localStorage in sync
         return profile;
@@ -278,6 +282,7 @@ export async function upsertProfile(profile: UserProfile): Promise<{ error?: str
         role:           profile.role,
         child_name:     profile.child_name,
         child_birthday: profile.child_birthday ?? null,
+        relation_title: profile.relation_title ?? null,
         updated_at:     new Date().toISOString(),
       });
 

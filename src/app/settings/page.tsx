@@ -77,6 +77,7 @@ function SettingsInner() {
     role: isRoleLocked ? inviteRole! : "parent",
     child_name: "",
     child_birthday: undefined,
+    relation_title: "",
   });
   const [loading, setLoading]             = useState(true);
   const [saving, setSaving]               = useState(false);
@@ -249,39 +250,35 @@ function SettingsInner() {
               />
             </div>
 
-            {/* Role */}
+            {/* Role — read-only; role is set at registration or via invite link */}
             <div className="space-y-1.5">
               <span className="block text-sm font-medium text-slate-700">Your Role</span>
-              {isRoleLocked ? (
-                <div className="flex items-center gap-2 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3">
-                  <span className="text-base" aria-hidden="true">
-                    {ROLES.find((r) => r.value === inviteRole)?.icon}
-                  </span>
-                  <span className="text-sm font-medium text-sky-700">
-                    {ROLES.find((r) => r.value === inviteRole)?.label}
-                  </span>
+              <div className="flex items-center gap-2 rounded-2xl border border-slate-100 bg-slate-50 px-4 py-3">
+                <span className="text-base" aria-hidden="true">
+                  {ROLES.find((r) => r.value === profile.role)?.icon ?? "🏠"}
+                </span>
+                <span className="text-sm font-medium text-slate-700">
+                  {ROLES.find((r) => r.value === profile.role)?.label ?? "Parent"}
+                </span>
+                {isRoleLocked && (
                   <Lock className="ml-auto h-3.5 w-3.5 text-sky-400" aria-hidden="true" />
-                </div>
-              ) : (
-                <div className="flex gap-2" role="group" aria-label="Select your role">
-                  {ROLES.map(({ value, label, icon }) => (
-                    <button
-                      key={value}
-                      type="button"
-                      onClick={() => setProfile({ ...profile, role: value })}
-                      aria-pressed={profile.role === value}
-                      className={`flex flex-1 flex-col items-center gap-1.5 rounded-2xl border py-3 text-xs font-medium transition-all active:scale-95 ${
-                        profile.role === value
-                          ? "border-sky-400 bg-sky-50 text-sky-700"
-                          : "border-slate-200 bg-white text-slate-500 hover:border-slate-300"
-                      }`}
-                    >
-                      <span className="text-base" aria-hidden="true">{icon}</span>
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              )}
+                )}
+              </div>
+            </div>
+
+            {/* Relation / Title */}
+            <div className="space-y-1.5">
+              <label htmlFor="relation-title" className="block text-sm font-medium text-slate-700">
+                Relation / Title
+              </label>
+              <input
+                id="relation-title"
+                type="text"
+                value={profile.relation_title ?? ""}
+                onChange={(e) => setProfile({ ...profile, relation_title: e.target.value })}
+                placeholder="e.g. Father, Mother, Primary Teacher"
+                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-800 placeholder:text-slate-400 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100 transition-colors"
+              />
             </div>
           </div>
 

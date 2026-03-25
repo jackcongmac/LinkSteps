@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft, CheckCircle2, Copy, Check, Lock } from "lucide-react";
-import { getProfile, upsertProfile, getFirstName } from "@/lib/mood-log";
+import { getProfile, upsertProfile, getFirstName, grantSelfAdmin } from "@/lib/mood-log";
 import type { UserProfile } from "@/lib/mood-log";
 import AppNav from "@/components/ui/app-nav";
 
@@ -99,6 +99,8 @@ function SettingsInner() {
   const [userEmail, setUserEmail]   = useState<string | null>(null);
   // Per-role "Copied!" state for invite buttons
   const [copiedRole, setCopiedRole] = useState<UserProfile["role"] | null>(null);
+  // Per-role "Grant Admin Power" toggle — when on, invite URL includes ?grant=1
+  const [adminGrants, setAdminGrants] = useState<Record<string, boolean>>({});
 
   // Load profile + auth email on mount.
   // Birthday is sanitised: corrupt values (e.g. "0019-…") are cleared.
@@ -123,9 +125,20 @@ function SettingsInner() {
         // If arriving via invite link, honour the locked role
         role: isRoleLocked ? inviteRole! : p.role,
       });
+      // ── Auto-grant: arrived via pre-authorised invite link ────
+      // If ?grant=1 is in the URL and the user is not yet an owner, elevate them.
+      if (searchParams.get("grant") === "1" && !p.is_owner) {
+        grantSelfAdmin().then(() => {
+          // Reload profile so is_owner=true is reflected immediately
+          getProfile().then((fresh) => {
+            setProfile((prev) => ({ ...prev, is_owner: fresh.is_owner }));
+          });
+        });
+      }
+
       setLoading(false);
     });
-  }, [isRoleLocked, inviteRole]);
+  }, [isRoleLocked, inviteRole, searchParams]);
 
   // Owner = DB flag OR email bypass (covers the period before the migration runs).
   const isOwner = profile.is_owner === true || userEmail === OWNER_EMAIL;
@@ -164,7 +177,8 @@ function SettingsInner() {
   }
 
   const handleInvite = useCallback(async (role: UserProfile["role"]) => {
-    const url  = `${window.location.origin}/settings?role=${role}`;
+    const grantAdmin = adminGrants[role] === true;
+    const url = `${window.location.origin}/settings?role=${role}${grantAdmin ? "&grant=1" : ""}`;
     const roleLabel = ROLES.find((r) => r.value === role)?.label ?? role;
     const childName   = getFirstName(profile.child_name)   || "your child";
     const inviterName = getFirstName(profile.display_name) || "Someone";
@@ -203,7 +217,7 @@ function SettingsInner() {
     setToastOk(true);
     setToast("Link copied! You can now paste it to WeChat.");
     setTimeout(() => setToast(null), 3000);
-  }, [profile.child_name, profile.display_name]);
+  }, [profile.child_name, profile.display_name, adminGrants]);
 
   // Mock used-seat counts: current user counts as 1 in their own role slot.
   // Replace with real DB query once profiles table is live.
@@ -397,45 +411,67 @@ function SettingsInner() {
                 const isFull = used >= total;
                 const isCopied = copiedRole === role;
                 return (
-                  <div key={role} className="flex items-center gap-3">
-                    {/* Role label + dots */}
-                    <div className="flex min-w-0 flex-1 flex-col gap-1">
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-sm" aria-hidden="true">{icon}</span>
-                        <span className="text-sm font-medium text-slate-700">{label}</span>
-                        <span className="text-xs text-slate-400">
-                          {used}/{total}
-                        </span>
+                  <div key={role} className="flex flex-col gap-2">
+                    <div className="flex items-center gap-3">
+                      {/* Role label + dots */}
+                      <div className="flex min-w-0 flex-1 flex-col gap-1">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-sm" aria-hidden="true">{icon}</span>
+                          <span className="text-sm font-medium text-slate-700">{label}</span>
+                          <span className="text-xs text-slate-400">
+                            {used}/{total}
+                          </span>
+                        </div>
+                        <SeatDots used={used} total={total} />
                       </div>
-                      <SeatDots used={used} total={total} />
+
+                      {/* Invite button */}
+                      <button
+                        type="button"
+                        onClick={() => void handleInvite(role)}
+                        disabled={isFull}
+                        aria-label={`Copy invite link for ${label}`}
+                        className={`flex shrink-0 items-center gap-1.5 rounded-2xl px-3 py-1.5 text-xs font-medium transition-all active:scale-95 ${
+                          isFull
+                            ? "bg-slate-100 text-slate-400 cursor-not-allowed"
+                            : isCopied
+                            ? "bg-emerald-50 text-emerald-600"
+                            : "bg-sky-50 text-sky-600 hover:bg-sky-100"
+                        }`}
+                      >
+                        {isCopied ? (
+                          <>
+                            <Check className="h-3 w-3" aria-hidden="true" />
+                            Copied!
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="h-3 w-3" aria-hidden="true" />
+                            {isFull ? "Full" : "Invite"}
+                          </>
+                        )}
+                      </button>
                     </div>
 
-                    {/* Invite button */}
-                    <button
-                      type="button"
-                      onClick={() => void handleInvite(role)}
-                      disabled={isFull}
-                      aria-label={`Copy invite link for ${label}`}
-                      className={`flex shrink-0 items-center gap-1.5 rounded-2xl px-3 py-1.5 text-xs font-medium transition-all active:scale-95 ${
-                        isFull
-                          ? "bg-slate-100 text-slate-400 cursor-not-allowed"
-                          : isCopied
-                          ? "bg-emerald-50 text-emerald-600"
-                          : "bg-sky-50 text-sky-600 hover:bg-sky-100"
-                      }`}
-                    >
-                      {isCopied ? (
-                        <>
-                          <Check className="h-3 w-3" aria-hidden="true" />
-                          Copied!
-                        </>
-                      ) : (
-                        <>
-                          <Copy className="h-3 w-3" aria-hidden="true" />
-                          {isFull ? "Full" : "Invite"}
-                        </>
-                      )}
-                    </button>
+                    {/* Grant Admin Power toggle — only shown when seat is not full */}
+                    {!isFull && (
+                      <label className="flex cursor-pointer items-center gap-2 pl-1">
+                        <input
+                          type="checkbox"
+                          checked={adminGrants[role] === true}
+                          onChange={(e) =>
+                            setAdminGrants((prev) => ({ ...prev, [role]: e.target.checked }))
+                          }
+                          className="h-3.5 w-3.5 rounded accent-sky-500"
+                        />
+                        <span className="text-[11px] text-slate-400">
+                          Grant admin power
+                          {adminGrants[role] && (
+                            <span className="ml-1 font-medium text-amber-500">· link includes admin rights</span>
+                          )}
+                        </span>
+                      </label>
+                    )}
                   </div>
                 );
               })}

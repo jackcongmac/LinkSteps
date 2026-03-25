@@ -319,6 +319,29 @@ export async function upsertProfile(profile: UserProfile): Promise<{ error?: str
   return {}; // localStorage save was successful — report success to the UI
 }
 
+/**
+ * Sets is_owner=true on the caller's own profile row.
+ * Called automatically when a user arrives via a pre-authorised invite link
+ * (?grant=1). Non-fatal: silently ignored if the column doesn't exist yet.
+ *
+ * Security note: requires a Supabase RLS policy that permits users to update
+ * their own is_owner column. See docs/schema-logs.md for the migration SQL.
+ */
+export async function grantSelfAdmin(): Promise<void> {
+  try {
+    const supabase = createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    const { error } = await supabase
+      .from('profiles')
+      .update({ is_owner: true })
+      .eq('id', user.id);
+    if (error) console.warn('[grantSelfAdmin] error:', error.code, error.message);
+  } catch (err) {
+    console.warn('[grantSelfAdmin] network error:', err);
+  }
+}
+
 // ── saveLog (logs table) ──────────────────────────────────────
 
 type SaveLogResult = { id: string } | { error: string };

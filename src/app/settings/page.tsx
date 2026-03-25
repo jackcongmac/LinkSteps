@@ -104,7 +104,10 @@ function SettingsInner() {
         const y = parseInt(raw.slice(0, 4), 10);
         if (!isNaN(y) && y >= 1000) safeBirthday = raw;
       }
-      setProfile({ ...p, child_birthday: safeBirthday, role: isRoleLocked ? inviteRole! : p.role });
+      const resolvedRole = isRoleLocked ? inviteRole! : p.role;
+      // Pre-fill "Father" for parents who haven't set a relation title yet
+      const defaultRelation = !p.relation_title && resolvedRole === "parent" ? "Father" : (p.relation_title ?? "");
+      setProfile({ ...p, child_birthday: safeBirthday, role: resolvedRole, relation_title: defaultRelation });
 
       if (searchParams.get("grant") === "1" && !p.is_owner) {
         grantSelfAdmin().then(() =>
@@ -250,23 +253,24 @@ function SettingsInner() {
               />
             </div>
 
-            {/* Role — read-only; role is set at registration or via invite link */}
+            {/* Role — identity badge, permanently locked */}
             <div className="space-y-1.5">
               <span className="block text-sm font-medium text-slate-700">Your Role</span>
-              <div className="flex items-center gap-2 rounded-2xl border border-slate-100 bg-slate-50 px-4 py-3">
-                <span className="text-base" aria-hidden="true">
+              <div className="flex cursor-default items-center gap-2.5 rounded-2xl border border-slate-200 bg-slate-100 px-4 py-3">
+                <span className="text-base leading-none" aria-hidden="true">
                   {ROLES.find((r) => r.value === profile.role)?.icon ?? "🏠"}
                 </span>
-                <span className="text-sm font-medium text-slate-700">
+                <span className="text-sm font-semibold text-slate-600">
                   {ROLES.find((r) => r.value === profile.role)?.label ?? "Parent"}
                 </span>
-                {isRoleLocked && (
-                  <Lock className="ml-auto h-3.5 w-3.5 text-sky-400" aria-hidden="true" />
-                )}
+                <Lock className="ml-auto h-3.5 w-3.5 text-slate-400" aria-hidden="true" />
               </div>
+              <p className="text-[10px] text-slate-400 pl-1">
+                Role is set when you join and cannot be changed here.
+              </p>
             </div>
 
-            {/* Relation / Title */}
+            {/* Relation / Title — free-text clarifier under the locked role */}
             <div className="space-y-1.5">
               <label htmlFor="relation-title" className="block text-sm font-medium text-slate-700">
                 Relation / Title
@@ -276,7 +280,11 @@ function SettingsInner() {
                 type="text"
                 value={profile.relation_title ?? ""}
                 onChange={(e) => setProfile({ ...profile, relation_title: e.target.value })}
-                placeholder="e.g. Father, Mother, Primary Teacher"
+                placeholder={
+                  profile.role === "teacher"   ? "e.g. Primary Teacher, Homeroom Teacher" :
+                  profile.role === "therapist" ? "e.g. OT, Speech Therapist, ABA Coach"  :
+                                                 "e.g. Father, Mother, Guardian"
+                }
                 className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-800 placeholder:text-slate-400 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100 transition-colors"
               />
             </div>

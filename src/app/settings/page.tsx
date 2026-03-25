@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ArrowLeft, CheckCircle2, Copy, Check, Lock } from "lucide-react";
+import { ArrowLeft, CheckCircle2, Copy, Check, Lock, UserMinus, ShieldCheck, ShieldOff } from "lucide-react";
 import { getProfile, upsertProfile, getFirstName, grantSelfAdmin } from "@/lib/mood-log";
 import type { UserProfile } from "@/lib/mood-log";
 import AppNav from "@/components/ui/app-nav";
@@ -34,9 +34,6 @@ const ROLES: { value: UserProfile["role"]; label: string; icon: string }[] = [
 ];
 
 // ── Seat quota config ────────────────────────────────────────
-//
-// MVP: counts are static (current user = 1 used in their own role).
-// Replace usedCounts with a real DB query once profiles table is live.
 
 const QUOTAS: { role: UserProfile["role"]; icon: string; label: string; total: number }[] = [
   { role: "parent",    icon: "🏠", label: "Parents",    total: 4 },
@@ -50,39 +47,29 @@ function SeatDots({ used, total }: { used: number; total: number }) {
       {Array.from({ length: total }).map((_, i) => (
         <span
           key={i}
-          className={`h-2 w-2 rounded-full ${
-            i < used ? "bg-sky-400" : "bg-slate-200"
-          }`}
+          className={`h-2 w-2 rounded-full ${i < used ? "bg-sky-400" : "bg-slate-200"}`}
         />
       ))}
     </div>
   );
 }
 
-// ── Inner component (reads searchParams) ─────────────────────
+// ── Constants ─────────────────────────────────────────────────
 
-// ── Age window constants (sliding, recalculated each render) ──
-// Supports ages 0–22. Both bounds auto-advance every calendar year.
 const MAX_AGE = 22;
-
-// ── Owner bypass ─────────────────────────────────────────────
-// Emergency fallback: if the DB migration has not yet run (is_owner column
-// missing) the account with this email is always treated as owner.
-// Replace with your Supabase login email.
 const OWNER_EMAIL = "jackcongus@gmail.com";
 
+// ── SettingsInner ─────────────────────────────────────────────
+
 function SettingsInner() {
-  const router = useRouter();
+  const router      = useRouter();
   const searchParams = useSearchParams();
 
-  // Sliding date-range window — recalculated on every render so the
-  // limits advance automatically on New Year without any code change.
   const currentYear = new Date().getFullYear();
-  const minDate = `${currentYear - MAX_AGE}-01-01`; // e.g. 2004-01-01 in 2026
-  const maxDate = `${currentYear}-12-31`;            // e.g. 2026-12-31 in 2026
+  const minDate = `${currentYear - MAX_AGE}-01-01`;
+  const maxDate = `${currentYear}-12-31`;
 
-  // If an invite link was used, the role is pre-set and locked.
-  const inviteRole = searchParams.get("role") as UserProfile["role"] | null;
+  const inviteRole   = searchParams.get("role") as UserProfile["role"] | null;
   const isRoleLocked = ROLES.some((r) => r.value === inviteRole);
 
   const [profile, setProfile] = useState<UserProfile>({
@@ -91,20 +78,16 @@ function SettingsInner() {
     child_name: "",
     child_birthday: undefined,
   });
-  const [loading, setLoading]       = useState(true);
-  const [saving, setSaving]         = useState(false);
-  const [toast, setToast]           = useState<string | null>(null);
-  const [toastOk, setToastOk]       = useState(true);
+  const [loading, setLoading]             = useState(true);
+  const [saving, setSaving]               = useState(false);
+  const [toast, setToast]                 = useState<string | null>(null);
+  const [toastOk, setToastOk]             = useState(true);
   const [birthdayError, setBirthdayError] = useState<string | null>(null);
-  const [userEmail, setUserEmail]   = useState<string | null>(null);
-  // Per-role "Copied!" state for invite buttons
-  const [copiedRole, setCopiedRole] = useState<UserProfile["role"] | null>(null);
-  // Popover: which role's config panel is open (parent only), + checkbox state
-  const [popoverRole, setPopoverRole] = useState<UserProfile["role"] | null>(null);
+  const [userEmail, setUserEmail]         = useState<string | null>(null);
+  const [copiedRole, setCopiedRole]       = useState<UserProfile["role"] | null>(null);
+  const [popoverRole, setPopoverRole]     = useState<UserProfile["role"] | null>(null);
   const [grantAdminInPopover, setGrantAdminInPopover] = useState(true);
 
-  // Load profile + auth email on mount.
-  // Birthday is sanitised: corrupt values (e.g. "0019-…") are cleared.
   useEffect(() => {
     import("@/lib/supabase").then(({ createClient }) => {
       const supabase = createClient();
@@ -114,41 +97,33 @@ function SettingsInner() {
     });
 
     getProfile().then((p) => {
-      const rawBirthday = p.child_birthday;
-      let safeBirthday: string | undefined = undefined;
-      if (rawBirthday) {
-        const y = parseInt(rawBirthday.slice(0, 4), 10);
-        if (!isNaN(y) && y >= 1000) safeBirthday = rawBirthday;
+      const raw = p.child_birthday;
+      let safeBirthday: string | undefined;
+      if (raw) {
+        const y = parseInt(raw.slice(0, 4), 10);
+        if (!isNaN(y) && y >= 1000) safeBirthday = raw;
       }
-      setProfile({
-        ...p,
-        child_birthday: safeBirthday,
-        // If arriving via invite link, honour the locked role
-        role: isRoleLocked ? inviteRole! : p.role,
-      });
-      // ── Auto-grant: arrived via pre-authorised invite link ────
-      // If ?grant=1 is in the URL and the user is not yet an owner, elevate them.
+      setProfile({ ...p, child_birthday: safeBirthday, role: isRoleLocked ? inviteRole! : p.role });
+
       if (searchParams.get("grant") === "1" && !p.is_owner) {
-        grantSelfAdmin().then(() => {
-          // Reload profile so is_owner=true is reflected immediately
-          getProfile().then((fresh) => {
-            setProfile((prev) => ({ ...prev, is_owner: fresh.is_owner }));
-          });
-        });
+        grantSelfAdmin().then(() =>
+          getProfile().then((fresh) =>
+            setProfile((prev) => ({ ...prev, is_owner: fresh.is_owner }))
+          )
+        );
       }
 
       setLoading(false);
     });
   }, [isRoleLocked, inviteRole, searchParams]);
 
-  // Owner = DB flag OR email bypass (covers the period before the migration runs).
   const isOwner = profile.is_owner === true || userEmail === OWNER_EMAIL;
 
+  // ── Save ──────────────────────────────────────────────────
   async function handleSave() {
     if (!profile.display_name.trim()) return;
-
-    // ── Birthday validation: owner-only field, skip for non-owners ──
     setBirthdayError(null);
+
     if (isOwner && profile.child_birthday) {
       const y = parseInt(profile.child_birthday.slice(0, 4), 10);
       if (isNaN(y) || y < 1000 || y < currentYear - MAX_AGE || y > currentYear) {
@@ -157,9 +132,6 @@ function SettingsInner() {
       }
     }
 
-    // Non-owners only update their own identity (display_name, role).
-    // Child fields are read-only for them — pass unchanged values so upsert
-    // is effectively a no-op on child_name / child_birthday.
     const payload: UserProfile = isOwner
       ? profile
       : { display_name: profile.display_name, role: profile.role, child_name: profile.child_name, child_birthday: profile.child_birthday, is_owner: false };
@@ -167,51 +139,36 @@ function SettingsInner() {
     setSaving(true);
     const result = await upsertProfile(payload);
     setSaving(false);
-    if (result.error) {
-      setToastOk(false);
-      setToast("Failed to save. Try again.");
-    } else {
-      setToastOk(true);
-      setToast("Saved!");
-    }
+    setToastOk(!result.error);
+    setToast(result.error ? "Failed to save. Try again." : "Saved!");
     setTimeout(() => setToast(null), 2500);
   }
 
+  // ── Invite ─────────────────────────────────────────────────
   const handleInvite = useCallback(async (role: UserProfile["role"], grantAdmin = false) => {
-    const url = `${window.location.origin}/settings?role=${role}${grantAdmin ? "&grant=1" : ""}`;
+    const url       = `${window.location.origin}/settings?role=${role}${grantAdmin ? "&grant=1" : ""}`;
     const roleLabel = ROLES.find((r) => r.value === role)?.label ?? role;
-    const childName   = getFirstName(profile.child_name)   || "your child";
+    const childName  = getFirstName(profile.child_name)   || "your child";
     const inviterName = getFirstName(profile.display_name) || "Someone";
 
-    // Share text intentionally omits any numeric age — privacy-first.
     const shareData = {
       title: `Join ${childName}'s Support Team on LinkSteps`,
       text:  `${inviterName} invites you to join as a ${roleLabel}. Click to connect:`,
       url,
     };
 
-    // ── Web Share API (mobile / modern browsers) ──────────────
     if (typeof navigator.share === "function" && navigator.canShare?.(shareData)) {
       try {
         await navigator.share(shareData);
-        // Share sheet opened — button feedback handled by the OS; no toast needed.
         setCopiedRole(role);
         setTimeout(() => setCopiedRole(null), 2000);
         return;
       } catch (err) {
-        // AbortError = user dismissed the sheet — silent.
-        // Any other error falls through to clipboard fallback.
         if (err instanceof Error && err.name === "AbortError") return;
       }
     }
 
-    // ── Clipboard fallback (desktop / unsupported browsers) ───
-    try {
-      await navigator.clipboard.writeText(url);
-    } catch {
-      // Clipboard also unavailable — nothing we can do, skip toast.
-      return;
-    }
+    try { await navigator.clipboard.writeText(url); } catch { return; }
     setCopiedRole(role);
     setTimeout(() => setCopiedRole(null), 2000);
     setToastOk(true);
@@ -219,13 +176,11 @@ function SettingsInner() {
     setTimeout(() => setToast(null), 3000);
   }, [profile.child_name, profile.display_name]);
 
-  // Mock used-seat counts: current user counts as 1 in their own role slot.
-  // Replace with real DB query once profiles table is live.
   function usedCount(role: UserProfile["role"]): number {
     return profile.role === role ? 1 : 0;
   }
 
-  // ── Skeleton ──────────────────────────────────────────────
+  // ── Skeleton ───────────────────────────────────────────────
   if (loading) {
     return (
       <main className="min-h-screen bg-slate-50 flex flex-col items-center px-4 py-8 pb-24">
@@ -234,8 +189,8 @@ function SettingsInner() {
             <div className="h-9 w-9 animate-pulse rounded-full bg-slate-200" />
             <div className="h-5 w-24 animate-pulse rounded-full bg-slate-200" />
           </div>
-          {[1, 2, 3].map((i) => (
-            <div key={i} className="h-40 w-full animate-pulse rounded-3xl bg-slate-200" />
+          {[1, 2].map((i) => (
+            <div key={i} className="h-56 w-full animate-pulse rounded-3xl bg-slate-200" />
           ))}
         </div>
         <AppNav />
@@ -243,12 +198,12 @@ function SettingsInner() {
     );
   }
 
-  // ── Main ──────────────────────────────────────────────────
+  // ── Main ───────────────────────────────────────────────────
   return (
     <main className="min-h-screen bg-slate-50 flex flex-col items-center px-4 py-8 pb-24">
       <div className="w-full max-w-sm flex flex-col gap-5">
 
-        {/* ── Header ──────────────────────────────────────── */}
+        {/* ── Header ───────────────────────────────────────── */}
         <div className="flex items-center gap-3">
           <button
             type="button"
@@ -267,158 +222,243 @@ function SettingsInner() {
           )}
         </div>
 
-        {/* ── Profile Section ─────────────────────────────── */}
-        <section className="rounded-3xl bg-white px-5 py-5 shadow-sm space-y-5">
-          <h2 className="text-xs font-semibold uppercase tracking-widest text-slate-400">
-            Profile
-          </h2>
+        {/* ════════════════════════════════════════════════════
+            MODULE 1 — Family Profile
+            Your identity + child info + Save, all in one card.
+        ════════════════════════════════════════════════════ */}
+        <section className="rounded-3xl bg-white shadow-sm overflow-hidden">
 
-          {/* Display Name */}
-          <div className="space-y-1.5">
-            <label htmlFor="display-name" className="block text-sm font-medium text-slate-700">
-              Your Name
-            </label>
-            <input
-              id="display-name"
-              type="text"
-              value={profile.display_name}
-              onChange={(e) => setProfile({ ...profile, display_name: e.target.value })}
-              placeholder="e.g. Jack"
-              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-800 placeholder:text-slate-400 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100 transition-colors"
-            />
-          </div>
-
-          {/* Role selector — locked when arriving via invite URL */}
-          <div className="space-y-1.5">
-            <span className="block text-sm font-medium text-slate-700">Your Role</span>
-            {isRoleLocked ? (
-              // Locked display — role was set by the invite link
-              <div className="flex items-center gap-2 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3">
-                <span className="text-base" aria-hidden="true">
-                  {ROLES.find((r) => r.value === inviteRole)?.icon}
-                </span>
-                <span className="text-sm font-medium text-sky-700">
-                  {ROLES.find((r) => r.value === inviteRole)?.label}
-                </span>
-                <Lock className="ml-auto h-3.5 w-3.5 text-sky-400" aria-hidden="true" />
-              </div>
-            ) : (
-              <div className="flex gap-2" role="group" aria-label="Select your role">
-                {ROLES.map(({ value, label, icon }) => (
-                  <button
-                    key={value}
-                    type="button"
-                    onClick={() => setProfile({ ...profile, role: value })}
-                    aria-pressed={profile.role === value}
-                    className={`flex flex-1 flex-col items-center gap-1.5 rounded-2xl border py-3 text-xs font-medium transition-all active:scale-95 ${
-                      profile.role === value
-                        ? "border-sky-400 bg-sky-50 text-sky-700"
-                        : "border-slate-200 bg-white text-slate-500 hover:border-slate-300"
-                    }`}
-                  >
-                    <span className="text-base" aria-hidden="true">{icon}</span>
-                    {label}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        </section>
-
-        {/* ── Kid's Info Section ───────────────────────────── */}
-        <section className="rounded-3xl bg-white px-5 py-5 shadow-sm space-y-5">
-          <div className="flex items-center justify-between">
+          {/* ── Your Profile ──────────────────────────────── */}
+          <div className="px-5 pt-5 pb-4 space-y-4">
             <h2 className="text-xs font-semibold uppercase tracking-widest text-slate-400">
-              Kid&apos;s Info
+              Your Profile
             </h2>
-            {!isOwner && (
-              <span className="flex items-center gap-1 text-[10px] text-slate-400">
-                <Lock className="h-3 w-3" aria-hidden="true" />
-                View only
-              </span>
-            )}
+
+            {/* Display Name */}
+            <div className="space-y-1.5">
+              <label htmlFor="display-name" className="block text-sm font-medium text-slate-700">
+                Your Name
+              </label>
+              <input
+                id="display-name"
+                type="text"
+                value={profile.display_name}
+                onChange={(e) => setProfile({ ...profile, display_name: e.target.value })}
+                placeholder="e.g. Jack"
+                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-800 placeholder:text-slate-400 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100 transition-colors"
+              />
+            </div>
+
+            {/* Role */}
+            <div className="space-y-1.5">
+              <span className="block text-sm font-medium text-slate-700">Your Role</span>
+              {isRoleLocked ? (
+                <div className="flex items-center gap-2 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3">
+                  <span className="text-base" aria-hidden="true">
+                    {ROLES.find((r) => r.value === inviteRole)?.icon}
+                  </span>
+                  <span className="text-sm font-medium text-sky-700">
+                    {ROLES.find((r) => r.value === inviteRole)?.label}
+                  </span>
+                  <Lock className="ml-auto h-3.5 w-3.5 text-sky-400" aria-hidden="true" />
+                </div>
+              ) : (
+                <div className="flex gap-2" role="group" aria-label="Select your role">
+                  {ROLES.map(({ value, label, icon }) => (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => setProfile({ ...profile, role: value })}
+                      aria-pressed={profile.role === value}
+                      className={`flex flex-1 flex-col items-center gap-1.5 rounded-2xl border py-3 text-xs font-medium transition-all active:scale-95 ${
+                        profile.role === value
+                          ? "border-sky-400 bg-sky-50 text-sky-700"
+                          : "border-slate-200 bg-white text-slate-500 hover:border-slate-300"
+                      }`}
+                    >
+                      <span className="text-base" aria-hidden="true">{icon}</span>
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
 
-          {/* Child's Name */}
-          <div className="space-y-1.5">
-            <label htmlFor="child-name" className="block text-sm font-medium text-slate-700">
-              Child&apos;s Name
-            </label>
-            <input
-              id="child-name"
-              type="text"
-              value={profile.child_name}
-              readOnly={!isOwner}
-              onChange={(e) => isOwner && setProfile({ ...profile, child_name: e.target.value })}
-              placeholder={isOwner ? "e.g. Ethan" : "—"}
-              className={`w-full rounded-2xl border px-4 py-3 text-sm text-slate-800 placeholder:text-slate-400 transition-colors ${
-                isOwner
-                  ? "bg-slate-50 border-slate-200 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100"
-                  : "bg-slate-100 border-slate-200 cursor-not-allowed text-slate-500 outline-none"
-              }`}
-            />
+          {/* ── Divider ───────────────────────────────────── */}
+          <div className="h-px bg-slate-100 mx-5" />
+
+          {/* ── Kid's Info ────────────────────────────────── */}
+          <div className="px-5 pt-4 pb-5 space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-xs font-semibold uppercase tracking-widest text-slate-400">
+                Kid&apos;s Info
+              </h2>
+              {!isOwner && (
+                <span className="flex items-center gap-1 text-[10px] text-slate-400">
+                  <Lock className="h-3 w-3" aria-hidden="true" />
+                  View only
+                </span>
+              )}
+            </div>
+
+            {/* Child Name */}
+            <div className="space-y-1.5">
+              <label htmlFor="child-name" className="block text-sm font-medium text-slate-700">
+                Child&apos;s Name
+              </label>
+              <input
+                id="child-name"
+                type="text"
+                value={profile.child_name}
+                readOnly={!isOwner}
+                onChange={(e) => isOwner && setProfile({ ...profile, child_name: e.target.value })}
+                placeholder={isOwner ? "e.g. Ethan" : "—"}
+                className={`w-full rounded-2xl border px-4 py-3 text-sm text-slate-800 placeholder:text-slate-400 transition-colors ${
+                  isOwner
+                    ? "bg-slate-50 border-slate-200 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100"
+                    : "bg-slate-100 border-slate-200 cursor-not-allowed text-slate-500 outline-none"
+                }`}
+              />
+            </div>
+
+            {/* Birthday */}
+            <div className="space-y-1.5">
+              <label htmlFor="child-birthday" className="block text-sm font-medium text-slate-700">
+                Birthday
+              </label>
+              <input
+                id="child-birthday"
+                type="date"
+                value={profile.child_birthday ?? ""}
+                readOnly={!isOwner}
+                min={isOwner ? minDate : undefined}
+                max={isOwner ? maxDate : undefined}
+                onChange={(e) => {
+                  if (!isOwner) return;
+                  setBirthdayError(null);
+                  setProfile({ ...profile, child_birthday: e.target.value || undefined });
+                }}
+                className={`w-full rounded-2xl border px-4 py-3 text-sm text-slate-800 transition-colors ${
+                  !isOwner
+                    ? "bg-slate-100 border-slate-200 cursor-not-allowed text-slate-500 outline-none"
+                    : birthdayError
+                    ? "bg-slate-50 border-rose-300 focus:border-rose-400 focus:outline-none focus:ring-2 focus:ring-rose-100"
+                    : "bg-slate-50 border-slate-200 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100"
+                }`}
+              />
+              {birthdayError && <p className="text-xs text-rose-500">{birthdayError}</p>}
+              {isOwner && !birthdayError && profile.child_birthday && (() => {
+                const y = parseInt(profile.child_birthday.slice(0, 4), 10);
+                if (isNaN(y) || y < 1000) return null;
+                const lbl = devStageLabel(profile.child_birthday);
+                return lbl ? <p className="text-xs text-slate-400">{lbl}</p> : null;
+              })()}
+            </div>
           </div>
 
-          {/* Birthday */}
-          <div className="space-y-1.5">
-            <label htmlFor="child-birthday" className="block text-sm font-medium text-slate-700">
-              Birthday
-            </label>
-            <input
-              id="child-birthday"
-              type="date"
-              value={profile.child_birthday ?? ""}
-              readOnly={!isOwner}
-              min={isOwner ? minDate : undefined}
-              max={isOwner ? maxDate : undefined}
-              onChange={(e) => {
-                if (!isOwner) return;
-                setBirthdayError(null);
-                setProfile({ ...profile, child_birthday: e.target.value || undefined });
-              }}
-              className={`w-full rounded-2xl border px-4 py-3 text-sm text-slate-800 transition-colors ${
-                !isOwner
-                  ? "bg-slate-100 border-slate-200 cursor-not-allowed text-slate-500 outline-none"
-                  : birthdayError
-                  ? "bg-slate-50 border-rose-300 focus:border-rose-400 focus:outline-none focus:ring-2 focus:ring-rose-100"
-                  : "bg-slate-50 border-slate-200 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100"
-              }`}
-            />
-            {birthdayError && (
-              <p className="text-xs text-rose-500">{birthdayError}</p>
-            )}
-            {isOwner && !birthdayError && profile.child_birthday && (() => {
-              const y = parseInt(profile.child_birthday.slice(0, 4), 10);
-              if (isNaN(y) || y < 1000) return null;
-              const label = devStageLabel(profile.child_birthday);
-              return label ? (
-                <p className="text-xs text-slate-400">{label}</p>
-              ) : null;
-            })()}
+          {/* ── Save (inside the card, flush bottom) ──────── */}
+          <div className="px-5 pb-5">
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={saving || !profile.display_name.trim()}
+              className="w-full rounded-2xl bg-sky-500 py-3.5 text-sm font-semibold text-white shadow-sm active:scale-95 transition-transform disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {saving ? "Saving…" : "Save Changes"}
+            </button>
           </div>
         </section>
 
-        {/* ── Team Seats Section (owner-only) ──────────────── */}
+        {/* ── Toast ─────────────────────────────────────────── */}
+        {toast && (
+          <div
+            className={`flex items-center justify-center gap-2 rounded-3xl px-4 py-3 text-sm font-medium ${
+              toastOk ? "bg-emerald-50 text-emerald-600" : "bg-rose-50 text-rose-600"
+            }`}
+            role="status"
+            aria-live="polite"
+          >
+            {toastOk && <CheckCircle2 className="h-4 w-4" aria-hidden="true" />}
+            {toast}
+          </div>
+        )}
+
+        {/* ════════════════════════════════════════════════════
+            MODULE 2 — Support Team Management (owner-only)
+        ════════════════════════════════════════════════════ */}
         {isOwner && (
           <>
-            {/* Backdrop — dismisses any open popover on outside click */}
+            {/* Backdrop for popover */}
             {popoverRole && (
-              <div
-                className="fixed inset-0 z-10"
-                onClick={() => setPopoverRole(null)}
-                aria-hidden="true"
-              />
+              <div className="fixed inset-0 z-10" onClick={() => setPopoverRole(null)} aria-hidden="true" />
             )}
 
-            <section className="rounded-3xl bg-white px-5 py-5 shadow-sm space-y-4">
-              <h2 className="text-xs font-semibold uppercase tracking-widest text-slate-400">
-                Team Seats
-              </h2>
+            <section className="rounded-3xl bg-white shadow-sm overflow-hidden">
+              <div className="px-5 pt-5 pb-2">
+                <h2 className="text-xs font-semibold uppercase tracking-widest text-slate-400">
+                  Support Team
+                </h2>
+              </div>
 
-              <div className="space-y-3">
+              {/* ── Active Members ──────────────────────────── */}
+              <div className="px-5 py-3 space-y-2">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-300">
+                  Active Members
+                </p>
+
+                {/* Current user row — MVP: only own profile is known */}
+                <div className="flex items-center gap-3 rounded-2xl border border-slate-100 bg-slate-50 px-3 py-2.5">
+                  <span className="text-base" aria-hidden="true">
+                    {ROLES.find((r) => r.value === profile.role)?.icon ?? "🏠"}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium text-slate-700">
+                      {getFirstName(profile.display_name) || "You"}
+                    </p>
+                    <p className="text-[10px] text-slate-400 capitalize">{profile.role} · you</p>
+                  </div>
+                  {/* Grant/Revoke Admin — parent rows only */}
+                  {profile.role === "parent" && (
+                    <button
+                      type="button"
+                      disabled
+                      title={isOwner ? "Revoke admin" : "Grant admin"}
+                      className="flex items-center gap-1 rounded-xl bg-sky-50 px-2 py-1 text-[10px] font-medium text-sky-600 opacity-60 cursor-not-allowed"
+                    >
+                      <ShieldCheck className="h-3 w-3" aria-hidden="true" />
+                      Admin
+                    </button>
+                  )}
+                  {/* Remove — disabled for self */}
+                  <button
+                    type="button"
+                    disabled
+                    title="Cannot remove yourself"
+                    className="flex items-center gap-1 rounded-xl bg-rose-50 px-2 py-1 text-[10px] font-medium text-rose-400 opacity-40 cursor-not-allowed"
+                  >
+                    <UserMinus className="h-3 w-3" aria-hidden="true" />
+                    Remove
+                  </button>
+                </div>
+
+                <p className="text-[10px] text-slate-300 pb-1">
+                  Full member list requires the profiles DB migration.
+                </p>
+              </div>
+
+              {/* ── Divider ──────────────────────────────────── */}
+              <div className="h-px bg-slate-100 mx-5" />
+
+              {/* ── Invite New Members ───────────────────────── */}
+              <div className="px-5 pt-3 pb-5 space-y-3">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-300">
+                  Invite New Members
+                </p>
+
                 {QUOTAS.map(({ role, icon, label, total }) => {
-                  const used = usedCount(role);
-                  const isFull = used >= total;
+                  const used     = usedCount(role);
+                  const isFull   = used >= total;
                   const isCopied = copiedRole === role;
                   const isParent = role === "parent";
 
@@ -442,11 +482,9 @@ function SettingsInner() {
                         onClick={() => {
                           if (isFull) return;
                           if (isParent) {
-                            // Parent: open config popover first
                             setPopoverRole(popoverRole === "parent" ? null : "parent");
                             setGrantAdminInPopover(true);
                           } else {
-                            // Teacher / Therapist: share directly, no admin rights
                             void handleInvite(role, false);
                           }
                         }}
@@ -458,14 +496,13 @@ function SettingsInner() {
                             : "bg-sky-50 text-sky-600 hover:bg-sky-100"
                         }`}
                       >
-                        {isCopied ? (
-                          <><Check className="h-3 w-3" aria-hidden="true" />Copied!</>
-                        ) : (
-                          <><Copy className="h-3 w-3" aria-hidden="true" />{isFull ? "Full" : "Invite"}</>
-                        )}
+                        {isCopied
+                          ? <><Check className="h-3 w-3" />Shared!</>
+                          : <><Copy className="h-3 w-3" />{isFull ? "Full" : "Invite"}</>
+                        }
                       </button>
 
-                      {/* Admin config popover — parent only */}
+                      {/* Parent-only admin config popover */}
                       {isParent && popoverRole === "parent" && (
                         <div
                           className="absolute right-0 top-full z-20 mt-2 w-56 rounded-2xl border border-slate-100 bg-white p-4 shadow-lg"
@@ -500,38 +537,24 @@ function SettingsInner() {
                     </div>
                   );
                 })}
+
+                <p className="text-[11px] text-slate-400 leading-relaxed pt-1">
+                  Role is pre-set and locked when the recipient opens the link.
+                </p>
               </div>
 
-              <p className="text-[11px] text-slate-400 leading-relaxed">
-                Share the invite link. The recipient&apos;s role will be pre-set and locked when they sign up.
-              </p>
+              {/* Grant/Revoke Admin note */}
+              <div className="mx-5 mb-5 flex items-start gap-2 rounded-2xl bg-slate-50 px-3 py-2.5">
+                <ShieldOff className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-400" aria-hidden="true" />
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  <span className="font-medium text-slate-500">Grant / Revoke Admin</span> for other
+                  members will be available once the profiles DB migration runs and the full
+                  member list loads.
+                </p>
+              </div>
             </section>
           </>
         )}
-
-        {/* ── Toast ───────────────────────────────────────── */}
-        {toast && (
-          <div
-            className={`flex items-center justify-center gap-2 rounded-3xl px-4 py-3 text-sm font-medium ${
-              toastOk ? "bg-emerald-50 text-emerald-600" : "bg-rose-50 text-rose-600"
-            }`}
-            role="status"
-            aria-live="polite"
-          >
-            {toastOk && <CheckCircle2 className="h-4 w-4" aria-hidden="true" />}
-            {toast}
-          </div>
-        )}
-
-        {/* ── Save Button ─────────────────────────────────── */}
-        <button
-          type="button"
-          onClick={handleSave}
-          disabled={saving || !profile.display_name.trim()}
-          className="w-full rounded-3xl bg-sky-500 py-4 text-sm font-semibold text-white shadow-sm active:scale-95 transition-transform disabled:opacity-40 disabled:cursor-not-allowed"
-        >
-          {saving ? "Saving…" : "Save Changes"}
-        </button>
 
       </div>
 
@@ -540,7 +563,7 @@ function SettingsInner() {
   );
 }
 
-// ── Page export (Suspense boundary for useSearchParams) ───────
+// ── Page export (Suspense boundary for useSearchParams) ────────
 
 export default function SettingsPage() {
   return (

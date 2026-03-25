@@ -105,7 +105,8 @@ function SettingsInner() {
         if (!isNaN(y) && y >= 1000) safeBirthday = raw;
       }
       const resolvedRole = isRoleLocked ? inviteRole! : p.role;
-      const defaultRelation = p.relation_title ?? "Parent";
+      // Parents get "Parent" as the default editable role label; teacher/therapist is locked to their role value
+      const defaultRelation = p.relation_title ?? (resolvedRole === "parent" ? "Parent" : "");
       setProfile({ ...p, child_birthday: safeBirthday, role: resolvedRole, relation_title: defaultRelation });
 
       if (searchParams.get("grant") === "1" && !p.is_owner) {
@@ -252,19 +253,31 @@ function SettingsInner() {
               />
             </div>
 
-            {/* Role — editable text field */}
+            {/* Role — editable for parents, locked for teacher/therapist */}
             <div className="space-y-1.5">
               <label htmlFor="user-role" className="block text-sm font-medium text-slate-700">
                 Your Role
               </label>
-              <input
-                id="user-role"
-                type="text"
-                value={profile.relation_title ?? ""}
-                onChange={(e) => setProfile({ ...profile, relation_title: e.target.value })}
-                placeholder="e.g. Parent, Teacher, Therapist"
-                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-800 placeholder:text-slate-400 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100 transition-colors"
-              />
+              {profile.role === "parent" ? (
+                <input
+                  id="user-role"
+                  type="text"
+                  value={profile.relation_title ?? ""}
+                  onChange={(e) => setProfile({ ...profile, relation_title: e.target.value })}
+                  placeholder="e.g. Father, Mother, Guardian"
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-800 placeholder:text-slate-400 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100 transition-colors"
+                />
+              ) : (
+                <div className="flex cursor-default items-center gap-2.5 rounded-2xl border border-slate-200 bg-slate-100 px-4 py-3">
+                  <span className="text-base leading-none" aria-hidden="true">
+                    {ROLES.find((r) => r.value === profile.role)?.icon}
+                  </span>
+                  <span className="text-sm font-medium text-slate-600">
+                    {ROLES.find((r) => r.value === profile.role)?.label}
+                  </span>
+                  <Lock className="ml-auto h-3.5 w-3.5 text-slate-400" aria-hidden="true" />
+                </div>
+              )}
             </div>
           </div>
 

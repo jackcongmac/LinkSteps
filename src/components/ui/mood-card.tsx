@@ -1,23 +1,12 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { Heart, MessageSquare, Mic } from "lucide-react";
+import { Heart, Loader2, MessageSquare, Mic } from "lucide-react";
 import MoodPicker, {
   moodOptions,
   type MoodLevel,
   type MoodIconName,
 } from "@/components/ui/mood-picker";
-
-// ── Web Speech API types ──────────────────────────────────────
-//
-// TypeScript's lib.dom includes SpeechRecognition, but the iOS / Android
-// vendor-prefixed version (webkitSpeechRecognition) is not declared.
-// Augmenting Window here keeps the rest of the file fully typed.
-declare global {
-  interface Window {
-    webkitSpeechRecognition?: typeof SpeechRecognition;
-  }
-}
 
 /** Returns the SpeechRecognition constructor, or null if unsupported. */
 function getSpeechRecognitionCtor(): (new () => SpeechRecognition) | null {
@@ -31,6 +20,8 @@ type MicState = "idle" | "recording" | "error";
 
 interface MoodCardProps {
   childName?: string;
+  /** When true the Save Log button shows a spinner and is disabled. */
+  saving?: boolean;
   onSave: (mood: MoodLevel, iconName: MoodIconName, note?: string) => void;
 }
 
@@ -38,6 +29,7 @@ interface MoodCardProps {
 
 export default function MoodCard({
   childName = "Ethan",
+  saving = false,
   onSave,
 }: MoodCardProps) {
   const [selected, setSelected] = useState<MoodLevel | undefined>();
@@ -280,7 +272,9 @@ export default function MoodCard({
         }}
         aria-hidden={!noteOpen}
       >
-        <div className="overflow-hidden">
+        {/* @QA: px-0.5 pb-0.5 gives the 2 px focus:ring-2 room to paint
+            without being clipped by overflow-hidden */}
+        <div className="overflow-hidden px-0.5 pb-0.5">
           <textarea
             id="mood-card-note"
             value={note}
@@ -315,15 +309,22 @@ export default function MoodCard({
 
       <button
         type="button"
-        disabled={selected === undefined}
+        disabled={selected === undefined || saving}
         onClick={handleSave}
-        className={`mt-4 w-full rounded-3xl py-3 text-sm font-medium transition-transform ${
-          selected !== undefined
+        className={`mt-4 flex w-full items-center justify-center gap-2 rounded-3xl py-3 text-sm font-medium transition-transform ${
+          selected !== undefined && !saving
             ? "bg-sky-500 text-white active:scale-95"
             : "bg-slate-200 text-slate-400 cursor-not-allowed"
         }`}
       >
-        Save Log
+        {saving ? (
+          <>
+            <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+            Saving…
+          </>
+        ) : (
+          "Save Log"
+        )}
       </button>
     </section>
   );

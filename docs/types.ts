@@ -7,7 +7,7 @@
 // 枚举 / 联合类型
 // ============================================================
 
-export type UserRole = 'parent' | 'teacher';
+export type UserRole = 'parent' | 'teacher' | 'therapist';
 
 export type LogCategory = 'mood' | 'behavior' | 'sleep' | 'meal' | 'medication' | 'note';
 
@@ -19,11 +19,31 @@ export type FeedbackEmoji = 'star' | 'heart' | 'thumbsup';
 // 数据库行类型 (对应 Supabase table rows)
 // ============================================================
 
+/**
+ * Controls which LogMetadata fields a therapist may read for a parent's child.
+ * Keys correspond to LogMetadata field names; missing key = false (deny).
+ * Example: { hrv: true, sleep_hours: true, steps: false }
+ * Default value in DB is '{}' (deny all — parent must explicitly grant).
+ */
+export interface TherapistPermission {
+  hrv?:          boolean;
+  sleep_hours?:  boolean;
+  steps?:        boolean;
+  pollen_level?: boolean;
+  pressure?:     boolean;
+  temperature?:  boolean;
+}
+
 export interface Profile {
   id: string;
   role: UserRole;
   display_name: string;
   avatar_url: string | null;
+  /**
+   * Therapist access grants set by this user (parent).
+   * Keyed by LogMetadata field name. Only relevant when role = 'parent'.
+   */
+  shared_metadata_permission: TherapistPermission;
   created_at: string;
   updated_at: string;
 }
@@ -156,9 +176,9 @@ export interface ChildWithTeachers extends Child {
 // ============================================================
 
 export type ProfileInsert = Pick<Profile, 'id' | 'role' | 'display_name'> &
-  Partial<Pick<Profile, 'avatar_url'>>;
+  Partial<Pick<Profile, 'avatar_url' | 'shared_metadata_permission'>>;
 
-export type ProfileUpdate = Partial<Pick<Profile, 'display_name' | 'avatar_url'>>;
+export type ProfileUpdate = Partial<Pick<Profile, 'display_name' | 'avatar_url' | 'shared_metadata_permission'>>;
 
 export type ChildInsert = Pick<Child, 'parent_id' | 'name'> &
   Partial<Pick<Child, 'date_of_birth' | 'avatar_url'>>;

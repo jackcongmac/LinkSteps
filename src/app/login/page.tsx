@@ -4,10 +4,11 @@ import {
   useState,
   useRef,
   useCallback,
+  Suspense,
   type ClipboardEvent,
   type KeyboardEvent,
 } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Mail, Phone, ArrowRight, CheckCircle2, Loader2 } from "lucide-react";
 import { signInWithPhone, verifyPhoneOtp, signInWithEmail } from "@/lib/auth";
 
@@ -101,8 +102,10 @@ function OtpInput({ value, onChange }: OtpInputProps) {
 
 // ── Page ──────────────────────────────────────────────────────
 
-export default function LoginPage() {
+function LoginPageInner() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const redirectTo = searchParams.get("next") ?? "/log";
 
   const [tab, setTab] = useState<Tab>("phone");
 
@@ -163,9 +166,9 @@ export default function LoginPage() {
       setPhoneError(result.error);
       setOtp(Array(OTP_LENGTH).fill(""));
     } else {
-      router.push("/log");
+      router.push(redirectTo);
     }
-  }, [fullPhone, otp, otpFilled, router]);
+  }, [fullPhone, otp, otpFilled, redirectTo, router]);
 
   // Auto-submit when all 6 digits are filled
   const prevOtpFilled = useRef(false);
@@ -454,5 +457,13 @@ export default function LoginPage() {
 
       </div>
     </main>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense>
+      <LoginPageInner />
+    </Suspense>
   );
 }

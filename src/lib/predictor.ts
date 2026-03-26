@@ -131,6 +131,33 @@ function clamp(v: number, min: number, max: number) {
 function evaluate(m: LogMetadata): RuleHit[] {
   const hits: RuleHit[] = [];
 
+  // ── Barometric Pressure — checked FIRST (highest sensory priority for ASD)
+  // A sudden pressure drop is the leading environmental trigger for Ethan.
+  // Must appear before sleep/HRV so it drives the headline when both are present.
+  if (m.pressure !== undefined) {
+    if (m.pressure < 990) {
+      const danger = clamp((1013 - m.pressure) / 30, 0.6, 1);
+      const drop = Math.round(1013 - m.pressure);
+      hits.push({
+        severity: 'warning',
+        factor: 'Low atmospheric pressure',
+        detail: `Barometric pressure is dropping (${m.pressure}hPa, ${drop}hPa below standard). Sensory sensitivity may be high. Prioritize transition warnings.`,
+        prescription: `Pressure: ${m.pressure}hPa (critical threshold: 990hPa)`,
+        metric: { label: 'Pressure', icon: '🌬️', value: `${m.pressure}hPa`, danger, barColor: 'bg-violet-400' },
+      });
+    } else if (m.pressure < 1003) {
+      const danger = clamp((1013 - m.pressure) / 30, 0.25, 0.55);
+      const drop = Math.round(1013 - m.pressure);
+      hits.push({
+        severity: 'caution',
+        factor: 'Slightly low pressure',
+        detail: `${m.pressure}hPa — ${drop}hPa below standard (1013hPa).`,
+        prescription: `Pressure: ${m.pressure}hPa (caution threshold: 1003hPa)`,
+        metric: { label: 'Pressure', icon: '🌬️', value: `${m.pressure}hPa`, danger, barColor: 'bg-slate-400' },
+      });
+    }
+  }
+
   // Steps
   if (m.steps !== undefined) {
     if (m.steps >= T.steps.veryHigh) {
@@ -227,31 +254,6 @@ function evaluate(m: LogMetadata): RuleHit[] {
     }
   }
 
-  // Barometric pressure (hPa) — standard ~1013
-  if (m.pressure !== undefined) {
-    if (m.pressure < 990) {
-      const danger = clamp((1013 - m.pressure) / 30, 0.6, 1);
-      const drop = Math.round(1013 - m.pressure);
-      hits.push({
-        severity: 'warning',
-        factor: 'Low atmospheric pressure',
-        detail: `${m.pressure}hPa — ${drop}hPa below standard (1013hPa).`,
-        prescription: `Pressure: ${m.pressure}hPa (critical threshold: 990hPa)`,
-        metric: { label: 'Pressure', icon: '🌬️', value: `${m.pressure}hPa`, danger, barColor: 'bg-violet-400' },
-      });
-    } else if (m.pressure < 1003) {
-      const danger = clamp((1013 - m.pressure) / 30, 0.25, 0.55);
-      const drop = Math.round(1013 - m.pressure);
-      hits.push({
-        severity: 'caution',
-        factor: 'Slightly low pressure',
-        detail: `${m.pressure}hPa — ${drop}hPa below standard (1013hPa).`,
-        prescription: `Pressure: ${m.pressure}hPa (caution threshold: 1003hPa)`,
-        metric: { label: 'Pressure', icon: '🌬️', value: `${m.pressure}hPa`, danger, barColor: 'bg-slate-400' },
-      });
-    }
-  }
-
   // Temperature
   if (m.temperature !== undefined) {
     if (m.temperature >= T.tempF.hot) {
@@ -325,21 +327,24 @@ export function generateDailyForecast(
   const factorMetrics = hits.map((h) => h.metric);
   const prescriptions = hits.map((h) => h.prescription);
 
-  // Build a concise factual headline from the leading signals
+  // Build a concise factual headline from the leading signals.
+  // Pressure is checked first — it is the highest-priority sensory factor.
+  const hasPressure     = hits.some((h) => h.factor.toLowerCase().includes('pressure'));
   const hasHighActivity = hits.some((h) => h.factor.toLowerCase().includes('activity'));
   const hasLowSleep     = hits.some((h) => h.factor.toLowerCase().includes('sleep'));
   const hasStress       = hits.some((h) => h.factor.toLowerCase().includes('stress') || h.factor.toLowerCase().includes('hrv'));
   const hasPollen       = hits.some((h) => h.factor.toLowerCase().includes('pollen'));
 
-  // Build signal list for headline (e.g. "high activity + low sleep + pollen")
+  // Signal parts listed in priority order: Pressure → Sleep/HRV → Pollen → Steps
   const signalParts: string[] = [];
-  if (hasHighActivity) signalParts.push(`${metadata.steps?.toLocaleString() ?? '—'} steps`);
+  if (hasPressure)     signalParts.push(`${metadata.pressure ?? '—'}hPa`);
   if (hasLowSleep)     signalParts.push(`${metadata.sleep_hours ?? '—'}h sleep`);
   if (hasStress)       signalParts.push(`HRV ${metadata.heart_rate_variability ?? '—'}ms`);
   if (hasPollen)       signalParts.push(`pollen ${metadata.pollen_level ?? '—'}/10`);
-  // Add any remaining signals not covered above
+  if (hasHighActivity) signalParts.push(`${metadata.steps?.toLocaleString() ?? '—'} steps`);
+  // Catch any remaining signals not covered above
   hits.forEach((h) => {
-    if (!hasHighActivity && !hasLowSleep && !hasStress && !hasPollen) {
+    if (!hasPressure && !hasHighActivity && !hasLowSleep && !hasStress && !hasPollen) {
       signalParts.push(h.factor.toLowerCase());
     }
   });
@@ -363,4 +368,21 @@ export function generateDailyForecast(
   const slogan = selectSlogan(hits, name);
 
   return { severity, threatLevel, headline, detail, factors, factorMetrics, prescriptions, slogan };
+}
+
+// ── generateEthanInsight ──────────────────────────────────────
+//
+// Named alias for generateDailyForecast, bound to Ethan's sensory profile.
+// Data source: logs.metadata JSONB column (via getTodayMetadata in mood-log.ts).
+// Priority order: Pressure > Sleep/HRV > Pollen > Steps > Temperature.
+//
+// Usage:
+//   import { generateEthanInsight } from '@/lib/predictor';
+//   const insight = generateEthanInsight(todayMetadata, 'Ethan');
+
+export function generateEthanInsight(
+  metadata: LogMetadata,
+  childName = 'Ethan',
+): ForecastResult {
+  return generateDailyForecast(metadata, childName);
 }

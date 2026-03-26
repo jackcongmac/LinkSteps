@@ -198,6 +198,17 @@ function QuickLogOverlay({ mood }: { mood: string }) {
   );
 }
 
+// ── Local date helper ────────────────────────────────────────
+// Returns YYYY-MM-DD in the device's local timezone.
+// Must NOT use toISOString() — that returns UTC, which is the next calendar day
+// for West-Coast users past 5 PM PST (UTC-8).
+function toLocalDateStr(d: Date = new Date()): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 // ── Page ─────────────────────────────────────────────────────
 
 function LogPageInner() {
@@ -209,8 +220,13 @@ function LogPageInner() {
   const [status, setStatus] = useState<SaveStatus>("idle");
   const [errorMsg, setErrorMsg] = useState<string>("");
   const [toast, setToast] = useState<string | null>(null);
-  // Incremented on each successful save to remount MoodCard (clears its state)
-  const [moodCardKey, setMoodCardKey] = useState(0);
+  // Date-seeded key: ensures MoodCard remounts fresh on each new calendar day,
+  // preventing yesterday's unsaved selection from persisting via soft-navigation.
+  // e.g. March 25 → 20260325; a new day means a new key, guaranteed remount.
+  const [moodCardKey, setMoodCardKey] = useState(() => {
+    const d = new Date();
+    return d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
+  });
   // Ref-based in-flight guard — avoids stale-closure issues with status in useCallback deps
   const isSavingRef = useRef(false);
   // Quick Log — ref guards against StrictMode double-fire
@@ -414,6 +430,8 @@ function LogPageInner() {
             <p className="text-xs text-slate-400 mt-0.5">
               How is {displayChildName || "Ethan"} feeling today?
             </p>
+            {/* Sensory weather badge — real data or "Livermore, CA" placeholder */}
+            <WeatherWidget metadata={todayMetadata} />
           </div>
           <Link
             href="/settings"
@@ -424,15 +442,15 @@ function LogPageInner() {
           </Link>
         </div>
 
-        {/* ── Mission Control — Today's Outlook (top of page) ── */}
-        {/* Toggle SHOW_DEMO = true to re-enable the triple-threat demo card */}
-        {(todayMetadata || SHOW_DEMO) && (
-          <OutlookCard
-            metadata={todayMetadata ?? DEMO_METADATA}
-            childName={displayChildName ?? (SHOW_DEMO ? "Ethan" : undefined)}
-            viewMode={new Date().getHours() < 12 ? "AM" : "PM"}
-          />
-        )}
+        {/* ── Mission Control — Today's Outlook (always visible) ── */}
+        {/* null metadata → gentle green "Waiting for data" default.
+            Real metadata → live 5-factor sensory forecast for Ethan.
+            SHOW_DEMO injects DEMO_METADATA to simulate a triple-threat day. */}
+        <OutlookCard
+          metadata={SHOW_DEMO ? DEMO_METADATA : todayMetadata}
+          childName={displayChildName ?? undefined}
+          viewMode={new Date().getHours() < 12 ? "AM" : "PM"}
+        />
 
         {/* ── Tomorrow's Forecast — set SHOW_TOMORROW_FORECAST = false to hide */}
         {SHOW_TOMORROW_FORECAST && aiData?.forecast && (
@@ -590,32 +608,41 @@ function LogPageInner() {
           <ProgressBar logged={progress.logged} total={progress.total} />
         )}
 
-        {/* ── Welcome nudge — shown only before the very first log ── */}
-        {!logsLoading && recentLogs.length === 0 && (
-          <div className="rounded-3xl border border-dashed border-slate-200 bg-white px-6 py-6 text-center shadow-sm">
-            <p className="text-2xl" aria-hidden="true">🌱</p>
-            <p className="mt-2.5 text-sm font-semibold text-slate-700">
-              How are you feeling today?
-            </p>
-            <p className="mt-1 text-xs leading-relaxed text-slate-400">
-              Tap a mood above to log your first check-in.
-              <br />
-              Your weekly chart will appear after a few logs.
-            </p>
-          </div>
-        )}
+        {/* ── Daily Log timeline — TODAY ONLY ──────────────────── */}
+        {/* Physical filter: only entries whose local date === today are shown.
+            History (yesterday and older) is intentionally excluded here.
+            When SHOW_DEMO = true and there are no real logs, show mock entries. */}
+        {!logsLoading && (() => {
+          const todayStr = toLocalDateStr();
+          const todayEntries = recentLogs.filter(
+            (e) => toLocalDateStr(new Date(e.created_at)) === todayStr,
+          );
+          const displayEntries = SHOW_DEMO && recentLogs.length === 0 ? DEMO_LOGS : todayEntries;
 
-        {/* ── Daily Log timeline ───────────────────────────────── */}
-        {/* When SHOW_DEMO = true and there are no real logs, show mock caregiver entries */}
-        {(recentLogs.length > 0 || (SHOW_DEMO && !logsLoading)) && (
-          <div className="rounded-3xl bg-white px-5 pt-5 pb-6 shadow-sm">
-            <h2 className="mb-4 text-sm font-semibold text-slate-700">Daily Log</h2>
-            <RecentLogs
-              entries={recentLogs.length > 0 ? recentLogs : DEMO_LOGS}
-              loading={logsLoading}
-            />
-          </div>
-        )}
+          return (
+            <>
+              <div className="rounded-3xl bg-white px-5 pt-5 pb-6 shadow-sm">
+                <RecentLogs
+                  entries={displayEntries}
+                  loading={false}
+                  emptyMessage={`No logs for today yet. Start by sharing how ${childName} is feeling.`}
+                />
+              </div>
+
+              {/* View History — passive link, only shown once there are past logs */}
+              {recentLogs.length > todayEntries.length && (
+                <p className="text-center text-xs text-slate-400">
+                  <Link
+                    href="/insights"
+                    className="underline underline-offset-2 hover:text-slate-600 transition-colors"
+                  >
+                    View history →
+                  </Link>
+                </p>
+              )}
+            </>
+          );
+        })()}
 
       </div>
 
@@ -695,6 +722,58 @@ function DailySloganCard({ ageYears }: { ageYears?: number }) {
   );
 }
 
+// ── WeatherWidget ────────────────────────────────────────────
+//
+// Compact 2-line sensor badge shown below the page subtitle.
+// Row 1: weather emoji + temperature (°F)
+// Row 2: most important factor — pressure is always priority-1
+//
+// Data source: todayMetadata (logs.metadata JSONB).
+// No metadata → "📍 Livermore, CA" placeholder.
+
+function WeatherWidget({ metadata }: { metadata: LogMetadata | null }) {
+  // No data fallback
+  if (!metadata) {
+    return (
+      <p className="mt-1.5 text-[11px] text-slate-400 tracking-wide">
+        📍 Livermore, CA
+      </p>
+    );
+  }
+
+  // ── Row 1: weather icon + temperature ──────────────────────
+  const tempStr =
+    metadata.temperature !== undefined
+      ? `${Math.round(metadata.temperature)}°F`
+      : "—°F";
+
+  // Icon driven by the worst active signal (pressure → pollen → default)
+  let weatherEmoji = "☀️";
+  if (metadata.pressure !== undefined && metadata.pressure < 990)        weatherEmoji = "⛈️";
+  else if (metadata.pressure !== undefined && metadata.pressure < 1003)  weatherEmoji = "🌧️";
+  else if (metadata.pollen_level !== undefined && metadata.pollen_level >= 7) weatherEmoji = "🌸";
+
+  // ── Row 2: most important factor (pressure priority) ───────
+  type FactorState = { text: string; className: string };
+  let factor: FactorState = { text: "Steady Pressure", className: "text-slate-400" };
+
+  if (metadata.pressure !== undefined) {
+    if (metadata.pressure < 990) {
+      factor = { text: "⚠ Pressure Dropping", className: "text-rose-500 font-semibold" };
+    } else if (metadata.pressure < 1003) {
+      factor = { text: "↓ Low Pressure", className: "text-amber-500 font-medium" };
+    }
+  }
+
+  return (
+    <div className="mt-1.5 flex items-center gap-2">
+      <span className="text-[11px] text-slate-400">{weatherEmoji} {tempStr}</span>
+      <span className="text-[10px] text-slate-300" aria-hidden="true">·</span>
+      <span className={`text-[11px] ${factor.className}`}>{factor.text}</span>
+    </div>
+  );
+}
+
 // ── Tomorrow's Forecast card (Log page — action-focused) ─────────
 
 function TomorrowForecastCard({ forecast }: { forecast: ForecastInsight }) {
@@ -721,13 +800,16 @@ function TomorrowForecastCard({ forecast }: { forecast: ForecastInsight }) {
 }
 
 // Calm, de-cluttered threat styles — white card, left border accent only
+// normal   = Emerald Green  → Stable / all signals clear
+// elevated = Amber          → Need Care / one or more caution signals
+// critical = Rose           → High Sensitivity / compound warning
 const THREAT_STYLE: Record<
   ThreatLevel,
   { leftBorder: string; header: string; pill: string }
 > = {
-  normal:   { leftBorder: "border-l-slate-200",  header: "text-slate-700", pill: "bg-slate-100 text-slate-500" },
-  elevated: { leftBorder: "border-l-amber-300",  header: "text-slate-700", pill: "bg-amber-50  text-amber-700" },
-  critical: { leftBorder: "border-l-rose-300",   header: "text-slate-700", pill: "bg-rose-50   text-rose-600"  },
+  normal:   { leftBorder: "border-l-emerald-300", header: "text-emerald-700", pill: "bg-emerald-50 text-emerald-600" },
+  elevated: { leftBorder: "border-l-amber-300",   header: "text-slate-700",   pill: "bg-amber-50  text-amber-700"   },
+  critical: { leftBorder: "border-l-rose-300",    header: "text-slate-700",   pill: "bg-rose-50   text-rose-600"    },
 };
 
 const VIEW_MODE_LABEL: Record<'AM' | 'PM', string> = {
@@ -740,26 +822,41 @@ function OutlookCard({
   childName,
   viewMode = "AM",
 }: {
-  metadata: LogMetadata;
+  metadata: LogMetadata | null;  // null = no biometric data yet today
   childName?: string;
   viewMode?: "AM" | "PM";
 }) {
   const router = useRouter();
+
+  // ── No data: gentle green default ──────────────────────────
+  if (!metadata) {
+    return (
+      <div className="rounded-2xl border-l-4 border-l-emerald-300 bg-white px-4 py-4 shadow-sm">
+        <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+          {VIEW_MODE_LABEL[viewMode]}
+        </p>
+        <p className="mt-1.5 text-sm font-medium leading-snug text-emerald-700">
+          Waiting for data… Keep the routine structured at this stage.
+        </p>
+        <button
+          type="button"
+          onClick={() => router.push("/insights")}
+          className="mt-3 text-xs font-medium text-slate-400 underline-offset-2 hover:text-slate-600 active:scale-95 transition"
+        >
+          查看完整周报 →
+        </button>
+      </div>
+    );
+  }
+
+  // ── Live forecast from biometric data ──────────────────────
   const forecast = generateDailyForecast(metadata, childName);
   const s = THREAT_STYLE[forecast.threatLevel];
-  const isDemo = childName !== undefined;
 
   return (
     <div
-      className={`relative rounded-2xl border-l-4 bg-white backdrop-blur-md px-4 py-4 shadow-sm ${s.leftBorder}`}
+      className={`rounded-2xl border-l-4 bg-white backdrop-blur-md px-4 py-4 shadow-sm ${s.leftBorder}`}
     >
-      {/* Demo badge */}
-      {isDemo && (
-        <span className="absolute right-3 top-3 rounded-full bg-slate-100 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-slate-400">
-          Demo
-        </span>
-      )}
-
       {/* Header label — changes based on AM/PM view */}
       <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
         {VIEW_MODE_LABEL[viewMode]}
@@ -788,7 +885,7 @@ function OutlookCard({
         )}
       </div>
 
-      {/* Spectrum-informed slogan — curated ASD-safe, shown only when signals are elevated */}
+      {/* Spectrum-informed slogan — only when signals are elevated */}
       {forecast.slogan && (
         <p className="mt-3 border-t border-slate-100 pt-2.5 text-[11px] leading-relaxed text-slate-500 italic">
           {forecast.slogan}

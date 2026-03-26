@@ -81,9 +81,10 @@ function groupByDate(entries: LogEntry[]): Group[] {
 interface RecentLogsProps {
   entries: LogEntry[];
   loading?: boolean;
+  emptyMessage?: string;
 }
 
-export default function RecentLogs({ entries, loading = false }: RecentLogsProps) {
+export default function RecentLogs({ entries, loading = false, emptyMessage }: RecentLogsProps) {
   // ── Skeleton ────────────────────────────────────────────────
   if (loading && entries.length === 0) {
     return (
@@ -108,7 +109,7 @@ export default function RecentLogs({ entries, loading = false }: RecentLogsProps
   if (!loading && entries.length === 0) {
     return (
       <p className="py-6 text-center text-sm text-slate-400">
-        No logs yet — save your first mood above!
+        {emptyMessage ?? "No logs yet — save your first mood above!"}
       </p>
     );
   }

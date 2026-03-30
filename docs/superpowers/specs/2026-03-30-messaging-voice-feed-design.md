@@ -53,6 +53,8 @@ CREATE TABLE messages (
   content          text,        -- text messages; NULL for voice
   audio_url        text,        -- Storage path; NULL for text
   audio_mime_type  text,        -- 'audio/webm' or 'audio/mp4'; NULL for text
+  is_read          boolean NOT NULL DEFAULT false,  -- set true after 3s on senior screen
+  read_at          timestamptz,
   created_at       timestamptz NOT NULL DEFAULT now(),
   -- Enforce content/audio_url mutual exclusivity by type
   CONSTRAINT messages_content_check CHECK (
@@ -83,6 +85,16 @@ CREATE POLICY "messages: carers can read"
 -- (senior and carer share one login). The two SELECT policies are intentionally
 -- equivalent for now. A future multi-login phase will add a separate senior auth flow.
 -- The carer read policy above already covers the senior's read access in Phase 1.
+
+-- Senior can mark messages as read (UPDATE is_read, read_at only)
+CREATE POLICY "messages: senior can mark read"
+  ON messages FOR UPDATE
+  USING (
+    senior_id IN (SELECT id FROM senior_profiles WHERE created_by = auth.uid())
+  )
+  WITH CHECK (
+    senior_id IN (SELECT id FROM senior_profiles WHERE created_by = auth.uid())
+  );
 
 -- Sender can insert their own messages, but only for a senior they are linked to
 CREATE POLICY "messages: sender can insert"
@@ -159,7 +171,8 @@ interface MessageBannerProps {
 
 - 无消息时：显示占位语（"Jack 还没有留言"），淡灰色
 - 有消息时：显示消息文字 + 🔊 按钮
-- 🔊 点击：`window.speechSynthesis.speak(new SpeechSynthesisUtterance(content))`，lang='zh-CN'
+- **点击文字气泡本身** → 触发 TTS：`window.speechSynthesis.speak(new SpeechSynthesisUtterance(content))`，lang='zh-CN'
+- 🔊 按钮保留作为视觉提示，点击效果相同；视力友好第一优先级
 - `isNew=true` 时：触发 HeartBurst 动画
 
 ### `VoiceRecorder`
@@ -238,6 +251,7 @@ supabase.channel('senior-home')
 
 - **VoiceRecorder 上传失败**：静默失败，显示"已发送 ✅"（老人不看错误）；`console.error` 记录。已知后果：晚辈端 FamilyTimeline 不会出现此条语音，属于 MVP 可接受的静默丢失。如需可靠性保证，Phase 2 可加重试队列。
 - **TTS 不可用**（浏览器不支持）：🔊 按钮不渲染，只显示文字
+- **已读更新失败**：静默失败，`console.error` 记录；不重试（非关键路径）
 - **ComposeMessage 发送失败**：晚辈侧可以看到错误（toast 或 inline），重试即可
 - **Storage URL 过期**：语音播放前重新获取 signed URL
 
@@ -261,5 +275,7 @@ supabase.channel('senior-home')
 - [ ] Carer 点击语音条目 → 播放
 - [ ] FamilyTimeline 正确按时间倒序合并 checkins + messages
 - [ ] HeartBurst 在新消息到达时触发，1.2s 后消失
-- [ ] TTS 不可用时🔊按钮不显示（不报错）
+- [ ] 点击文字气泡 → 中文语音朗读（TTS）
+- [ ] TTS 不可用时🔊按钮不显示，气泡仍可点击（不报错）
+- [ ] 消息在老人端停留 3 秒 → is_read=true → 晚辈端 FamilyTimeline 显示"已读"标记
 - [ ] 60 秒录音上限正常工作

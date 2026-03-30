@@ -1229,10 +1229,12 @@ setMessages((msgRows as MessageRow[]) ?? []);
 
 **Replace the entire existing Realtime `useEffect`** (currently at lines 247–279 of `carer/page.tsx`) with this complete block. Do not add `.on()` calls incrementally — replace the whole `useEffect` to avoid channel name collisions and missing cleanup.
 
-Add this import at the top of the file:
+Update the existing `@supabase/supabase-js` import at the top of `carer/page.tsx` to include both payload types, and ensure `CheckinRow` is imported:
 ```tsx
-import type { RealtimePostgresUpdatePayload } from "@supabase/supabase-js";
+import type { RealtimePostgresInsertPayload, RealtimePostgresUpdatePayload } from "@supabase/supabase-js";
+import type { CheckinRow } from "@/components/senior/carer/CheckinTimeline";
 ```
+(The `CheckinRow` import is already present in the existing file — verify it's not removed during the edit.)
 
 Then replace the Realtime `useEffect`:
 ```tsx

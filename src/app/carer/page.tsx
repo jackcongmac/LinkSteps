@@ -249,6 +249,9 @@ export default function CarerDashboard() {
         console.error("[carer] messages query failed:", messagesError.message);
       }
 
+      console.log("[carer] messages loaded:", msgRows?.length ?? 0,
+        msgRows?.map((m) => ({ id: (m as MessageRow).id.slice(0, 8), type: (m as MessageRow).type })));
+
       setMessages((msgRows as MessageRow[]) ?? []);
     } else {
       console.warn('[carer] no senior_profile found for user', user.id,

@@ -4,7 +4,7 @@
 import { useState, useRef, useCallback, useMemo } from "react";
 import { createClient } from "@/lib/supabase";
 
-type RecorderState = "idle" | "recording" | "uploading" | "done";
+type RecorderState = "idle" | "recording" | "done" | "error";
 
 interface Props {
   seniorId: string | null;
@@ -50,7 +50,6 @@ export default function VoiceRecorder({ seniorId }: Props) {
 
       // Show success immediately — senior never waits on network
       setRecState("done");
-      setTimeout(() => { setRecState("idle"); setSeconds(0); }, 3000);
 
       const blob      = new Blob(chunksRef.current, { type: mimeType });
       const ext       = mimeType.includes("webm") ? "webm" : "mp4";
@@ -63,11 +62,20 @@ export default function VoiceRecorder({ seniorId }: Props) {
 
       if (uploadError) {
         console.error("[VoiceRecorder] upload failed:", uploadError.message);
+        setRecState("error");
+        setTimeout(() => { setRecState("idle"); setSeconds(0); }, 4000);
         return;
       }
 
+      console.log("[VoiceRecorder] upload OK →", path);
+
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+      if (!user) {
+        console.error("[VoiceRecorder] insert skipped — user is null (session expired?)");
+        setRecState("error");
+        setTimeout(() => { setRecState("idle"); setSeconds(0); }, 4000);
+        return;
+      }
 
       const { error: insertError } = await supabase.from("messages").insert({
         id:              messageId,
@@ -80,8 +88,14 @@ export default function VoiceRecorder({ seniorId }: Props) {
       });
 
       if (insertError) {
-        console.error("[VoiceRecorder] insert failed:", insertError.message);
+        console.error("[VoiceRecorder] insert failed:", insertError.message, insertError.code);
+        setRecState("error");
+        setTimeout(() => { setRecState("idle"); setSeconds(0); }, 4000);
+        return;
       }
+
+      console.log("[VoiceRecorder] insert OK, messageId:", messageId);
+      setTimeout(() => { setRecState("idle"); setSeconds(0); }, 3000);
     };
 
     recorder.start();
@@ -124,12 +138,17 @@ export default function VoiceRecorder({ seniorId }: Props) {
     );
   }
 
+  if (recState === "error") {
+    return (
+      <div className="flex items-center gap-2 px-5 py-3 rounded-full bg-red-50 border border-red-100 text-red-500 text-base">
+        ⚠️ 发送失败，请重试
+      </div>
+    );
+  }
+
   return (
     <div className="flex items-center gap-2 px-5 py-3 rounded-full bg-emerald-50 border border-emerald-100 text-emerald-600 text-base">
-      {recState === "uploading"
-        ? <span className="w-4 h-4 rounded-full border-2 border-emerald-300 border-t-emerald-600 animate-spin" />
-        : "✅"}
-      {recState === "uploading" ? "发送中…" : "已发送"}
+      ✅ 已发送
     </div>
   );
 }

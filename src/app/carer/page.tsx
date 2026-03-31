@@ -14,7 +14,8 @@
  */
 
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
-import { Play, Pause } from "lucide-react";
+import Link from "next/link";
+import { Play, Pause, UserCog } from "lucide-react";
 import { createClient } from "@/lib/supabase";
 import type { CheckinRow } from "@/components/senior/carer/CheckinTimeline";
 import type { RealtimePostgresInsertPayload, RealtimePostgresUpdatePayload } from "@supabase/supabase-js";
@@ -98,12 +99,12 @@ function generateInsight(w: WeatherPayload): string {
   if (w.pressure < 1005)
     return `北京气压突降（${w.pressure} hPa），可能引起关节不适，建议提醒妈妈注意保暖休息。`;
   if (w.pressure < 1010)
-    return `北京气压偏低，适合轻度室内活动。天气${w.text}，${w.temp_c}°C，出门记得加件外套。`;
-  if (w.temp_c >= 28)
-    return `北京气温较高（${w.temp_c}°C），提醒妈妈多补水、避免午后高温时段外出。`;
-  if (w.temp_c <= 10)
-    return `北京天气偏凉（${w.temp_c}°C），提醒妈妈出门前多加衣物、注意保暖。`;
-  return `北京今日${w.text}，气温 ${w.temp_c}°C，气压平稳（${w.pressure} hPa），天气条件良好，适合外出散步。`;
+    return `北京气压偏低，适合轻度室内活动。天气${w.text}，出门记得加件外套。`;
+  if (w.temp_max >= 28)
+    return `北京今日气温偏高，提醒妈妈多补水、避免午后高温时段外出。`;
+  if (w.temp_min <= 10)
+    return `北京今日气温偏凉，提醒妈妈出门前多加衣物、注意保暖。`;
+  return `北京今日${w.text}，天气条件良好，适合外出散步。`;
 }
 
 // ── Health types ──────────────────────────────────────────────
@@ -123,8 +124,7 @@ interface HealthData {
 
 interface SleepSession {
   id:            string;
-  session_date:  string;
-  started_at:    string | null;
+  start_time:    string | null;
   ended_at:      string | null;
   current_state: 'awake' | 'light' | 'deep' | null;
   total_hours:   number | null;
@@ -538,11 +538,11 @@ interface SleepInsightsCardProps {
 }
 
 function SleepInsightsCard({ session }: SleepInsightsCardProps) {
-  const isNightWatch     = session !== null && session.ended_at === null && session.started_at !== null;
+  const isNightWatch     = session !== null && session.ended_at === null && session.start_time !== null;
   const isMorningSummary = session !== null && session.ended_at !== null;
 
-  const startedAtBj = session?.started_at
-    ? new Date(session.started_at).toLocaleString("zh-CN", {
+  const startedAtBj = session?.start_time
+    ? new Date(session.start_time).toLocaleString("zh-CN", {
         timeZone: "Asia/Shanghai",
         hour:     "2-digit",
         minute:   "2-digit",
@@ -699,8 +699,8 @@ function WeatherCard({ weather, loading }: WeatherCardProps) {
           <p className="text-slate-700 font-semibold text-base">妈妈所在城市天气</p>
         </div>
         {weather && (
-          <span className="text-sm text-slate-400">
-            {weather.temp_c}°C · {weather.text}
+          <span className="text-sm text-slate-500 font-medium">
+            当前气温: {weather.temp_c}°C
           </span>
         )}
       </div>
@@ -728,7 +728,12 @@ function WeatherCard({ weather, loading }: WeatherCardProps) {
         </div>
       )}
 
-      {/* AI insight */}
+      {/* Temp range + AI insight */}
+      {weather && (
+        <p className="text-slate-400 text-xs">
+          气温 {weather.temp_min}–{weather.temp_max}°C · {weather.text}
+        </p>
+      )}
       <p className="text-slate-500 text-sm leading-relaxed">
         {loading
           ? "正在获取天气数据…"
@@ -830,18 +835,19 @@ export default function CarerDashboard() {
         }
       }
 
-      // Fetch latest sleep session (today or yesterday BJ time — within 2 days to avoid stale data)
-      const bjToday = new Date().toLocaleString("en-US", { timeZone: "Asia/Shanghai" });
-      const bjDate  = new Date(bjToday);
-      bjDate.setDate(bjDate.getDate() - 1);
-      const cutoff  = `${bjDate.getFullYear()}-${String(bjDate.getMonth() + 1).padStart(2, "0")}-${String(bjDate.getDate()).padStart(2, "0")}`;
+      // Fetch latest sleep session (started within the last 2 days BJ time to avoid stale data)
+      const bjCutoffBase = new Date().toLocaleString("en-US", { timeZone: "Asia/Shanghai" });
+      const bjCutoffDate = new Date(bjCutoffBase);
+      bjCutoffDate.setDate(bjCutoffDate.getDate() - 1);
+      bjCutoffDate.setHours(0, 0, 0, 0);
+      const cutoffISO = new Date(bjCutoffDate.getTime() + 8 * 60 * 60 * 1000).toISOString(); // BJ midnight → UTC
 
       const { data: sleepRows, error: sleepError } = await supabase
         .from("sleep_sessions")
-        .select("id, session_date, started_at, ended_at, current_state, total_hours, deep_hours, light_hours, rem_hours")
+        .select("id, start_time, ended_at, current_state, total_hours, deep_hours, light_hours, rem_hours")
         .eq("senior_id", id)
-        .gte("session_date", cutoff)
-        .order("session_date", { ascending: false })
+        .gte("start_time", cutoffISO)
+        .order("start_time", { ascending: false })
         .limit(1);
 
       if (sleepError) {
@@ -1014,17 +1020,26 @@ export default function CarerDashboard() {
           <div>
             <p className="text-slate-400 text-sm">{getGreeting()}</p>
             <h1 className="text-slate-800 text-2xl font-semibold mt-0.5">
-              妈妈的平安看板
+              平安扣看板
             </h1>
           </div>
-          {/* Beijing time — always visible, primary clock */}
-          <div className="flex flex-col items-end mt-0.5">
-            <span className="text-slate-700 text-lg font-semibold leading-tight tabular-nums">
-              {getBjClock().time}
-            </span>
-            <span className="text-xs text-slate-400 mt-0.5">
-              北京 · {getBjClock().period}
-            </span>
+          {/* Beijing time + profile shortcut */}
+          <div className="flex items-center gap-3 mt-0.5">
+            <div className="flex flex-col items-end">
+              <span className="text-slate-700 text-lg font-semibold leading-tight tabular-nums">
+                {getBjClock().time}
+              </span>
+              <span className="text-xs text-slate-400 mt-0.5">
+                北京 · {getBjClock().period}
+              </span>
+            </div>
+            <Link
+              href="/carer/profile"
+              className="flex h-8 w-8 items-center justify-center rounded-full bg-white shadow-sm active:scale-95 transition-transform"
+              aria-label="长辈信息"
+            >
+              <UserCog className="h-4 w-4 text-slate-500" />
+            </Link>
           </div>
         </div>
 
@@ -1049,7 +1064,7 @@ export default function CarerDashboard() {
         {/* ── Timeline ── */}
         <div className="bg-white rounded-3xl border border-slate-100 shadow-sm px-5 py-5">
           <div className="flex items-center justify-between mb-5">
-            <p className="text-slate-700 font-semibold text-base">最近动态</p>
+            <p className="text-slate-700 font-semibold text-base">平安扣信号</p>
             {/* Live badge */}
             <span className="flex items-center gap-1.5 text-xs text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />

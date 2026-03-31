@@ -9,16 +9,19 @@ import MessageBanner  from "@/components/senior/senior/MessageBanner";
 import VoiceRecorder  from "@/components/senior/senior/VoiceRecorder";
 import QuickRequest   from "@/components/senior/senior/QuickRequest";
 import type { MessageRow } from "@/types/messages";
+import { startHealthSimulator } from "@/lib/health-simulator";
+import type { WeatherPayload } from "@/app/api/weather/route";
 
 export default function SeniorHomePage() {
   // ── Stable Supabase instance — never recreate on render ──────
   const supabase = useMemo(() => createClient(), []);
 
-  const [seniorId,  setSeniorId]  = useState<string | null>(null);
-  const [latestMsg, setLatestMsg] = useState<MessageRow | null>(null);
-  const [msgIsNew,  setMsgIsNew]  = useState(false);
-  const [loading,   setLoading]   = useState(true);
-  const [ready,     setReady]     = useState(false);
+  const [seniorId,   setSeniorId]   = useState<string | null>(null);
+  const [latestMsg,  setLatestMsg]  = useState<MessageRow | null>(null);
+  const [msgIsNew,   setMsgIsNew]   = useState(false);
+  const [loading,    setLoading]    = useState(true);
+  const [ready,      setReady]      = useState(false);
+  const [weather,    setWeather]    = useState<WeatherPayload | null>(null);
 
   // ── Load senior profile + latest carer message ────────────────
   const loadData = useCallback(async () => {
@@ -50,11 +53,24 @@ export default function SeniorHomePage() {
       setLatestMsg((msgs as MessageRow[] | null)?.[0] ?? null);
     }
 
+    // Fetch local city weather
+    fetch("/api/weather?city=beijing")
+      .then((r) => r.json())
+      .then((d) => setWeather(d as WeatherPayload))
+      .catch(() => {/* non-critical */});
+
     setLoading(false);
     setTimeout(() => setReady(true), 60);
   }, [supabase]);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  // ── Health simulator — starts once seniorId is resolved ──────
+  useEffect(() => {
+    if (!seniorId) return;
+    const stop = startHealthSimulator(supabase, seniorId);
+    return stop;
+  }, [supabase, seniorId]);
 
   // ── Realtime: subscribe once seniorId is known ────────────────
   // Broad subscription (no server-side filter) — client-side match.
@@ -186,6 +202,21 @@ export default function SeniorHomePage() {
         ready ? "opacity-100" : "opacity-0",
       ].join(" ")}
     >
+      {/* ── 当前城市天气 ── */}
+      {weather && (
+        <div className="w-full max-w-xs rounded-3xl bg-white border border-slate-100 shadow-sm px-5 py-4 flex items-center justify-between">
+          <p className="text-slate-700 font-semibold text-base">当前城市天气</p>
+          <div className="flex flex-col items-end gap-0.5">
+            <span className="text-slate-700 text-sm font-medium">
+              当前气温: {weather.temp_c}°C
+            </span>
+            <span className="text-slate-400 text-xs">
+              气温 {weather.temp_min}–{weather.temp_max}°C · {weather.text}
+            </span>
+          </div>
+        </div>
+      )}
+
       <MessageBanner
         message={latestMsg}
         isNew={msgIsNew}

@@ -63,67 +63,117 @@ function generateInsight(w: WeatherPayload): string {
   return `上海今日${w.text}，气温 ${w.temp_c}°C，气压平稳（${w.pressure} hPa），天气条件良好，适合外出散步。`;
 }
 
+// ── Status derivation ─────────────────────────────────────────
+
+type StatusKind = 'safe' | 'idle' | 'wechat' | 'call' | 'voice';
+
+interface StatusInfo {
+  kind:        StatusKind;
+  label:       string;
+  icon:        string;
+  subtext:     string;
+  itemId:      string | null;
+  dismissible: boolean;
+}
+
+const STATUS_STYLE: Record<StatusKind, { bg: string; text: string; dot: string; ring: string }> = {
+  safe:   { bg: 'bg-emerald-50 border-emerald-100', text: 'text-emerald-700', dot: 'bg-emerald-100', ring: 'border-emerald-400' },
+  idle:   { bg: 'bg-amber-50 border-amber-100',     text: 'text-amber-700',   dot: 'bg-amber-100',   ring: 'border-amber-400'   },
+  wechat: { bg: 'bg-emerald-50 border-emerald-200', text: 'text-emerald-700', dot: 'bg-emerald-100', ring: 'border-emerald-400' },
+  call:   { bg: 'bg-amber-50 border-amber-200',     text: 'text-amber-700',   dot: 'bg-amber-100',   ring: 'border-amber-400'   },
+  voice:  { bg: 'bg-purple-50 border-purple-100',   text: 'text-purple-700',  dot: 'bg-purple-100',  ring: 'border-purple-400'  },
+};
+
+const ACTION_KINDS = new Set(['checkin', 'wechat_request', 'call_request', 'voice']);
+
+function deriveStatus(feed: FeedItem[], dismissedId: string | null): StatusInfo {
+  const latest     = feed.find((item) => ACTION_KINDS.has(item.kind)) ?? null;
+  const lastCheckin = feed.find((i) => i.kind === 'checkin') ?? null;
+  const baseGood   = lastCheckin !== null && isWithin24h(lastCheckin.created_at);
+  const baseSubtext = lastCheckin
+    ? `最后平安信号：${relativeTime(lastCheckin.created_at)}`
+    : '还没有收到平安信号';
+
+  // Baseline: no action, dismissed, or the latest is just a checkin
+  if (!latest || latest.id === dismissedId || latest.kind === 'checkin') {
+    return {
+      kind:        baseGood ? 'safe' : 'idle',
+      label:       baseGood ? '一切安好' : '建议问候',
+      icon:        baseGood ? '❤️' : '🔔',
+      subtext:     baseSubtext,
+      itemId:      latest?.id ?? null,
+      dismissible: false,
+    };
+  }
+
+  const ago = relativeTime(latest.created_at);
+
+  if (latest.kind === 'wechat_request') return { kind: 'wechat', label: '请求回复微信',   icon: '💬', subtext: `${ago}发来请求`, itemId: latest.id, dismissible: true };
+  if (latest.kind === 'call_request')   return { kind: 'call',   label: '请求回个电话',   icon: '📞', subtext: `${ago}发来请求`, itemId: latest.id, dismissible: true };
+  if (latest.kind === 'voice')          return { kind: 'voice',  label: '收到新语音留言', icon: '🎙️', subtext: `${ago}发来语音`, itemId: latest.id, dismissible: true };
+
+  return { kind: baseGood ? 'safe' : 'idle', label: baseGood ? '一切安好' : '建议问候', icon: baseGood ? '❤️' : '🔔', subtext: baseSubtext, itemId: null, dismissible: false };
+}
+
 // ── StatusHeader ──────────────────────────────────────────────
 
 interface StatusHeaderProps {
-  lastCheckin:  string | null;
-  pulse:        boolean;          // true briefly when realtime fires
-  onPulseEnd:   () => void;
+  status:     StatusInfo;
+  pulse:      boolean;
+  onPulseEnd: () => void;
+  onDismiss:  () => void;
 }
 
-function StatusHeader({ lastCheckin, pulse, onPulseEnd }: StatusHeaderProps) {
-  const good = lastCheckin !== null && isWithin24h(lastCheckin);
+function StatusHeader({ status, pulse, onPulseEnd, onDismiss }: StatusHeaderProps) {
+  const style = STATUS_STYLE[status.kind];
 
   return (
     <div
       className={[
         "relative rounded-3xl px-6 py-7 flex flex-col items-center gap-3 overflow-hidden",
-        "transition-all duration-500 ease-out",
-        good
-          ? "bg-emerald-50 border border-emerald-100"
-          : "bg-amber-50  border border-amber-100",
+        "transition-all duration-500 ease-out border",
+        style.bg,
       ].join(" ")}
     >
-      {/* Realtime pulse ring — fires on new checkin */}
+      {/* Realtime pulse ring */}
       {pulse && (
         <span
           onAnimationEnd={onPulseEnd}
-          className="absolute inset-0 rounded-3xl border-2 border-emerald-400 animate-[ringBurst_0.7s_ease-out_forwards] pointer-events-none"
+          className={`absolute inset-0 rounded-3xl border-2 ${style.ring} animate-[ringBurst_0.7s_ease-out_forwards] pointer-events-none`}
         />
       )}
 
-      {/* Status dot */}
+      {/* Status icon */}
       <div className="relative flex items-center justify-center">
-        <span
-          className={[
-            "w-20 h-20 rounded-full flex items-center justify-center text-4xl",
-            good ? "bg-emerald-100" : "bg-amber-100",
-          ].join(" ")}
-        >
-          {good ? "❤️" : "🔔"}
+        <span className={["w-20 h-20 rounded-full flex items-center justify-center text-4xl", style.dot].join(" ")}>
+          {status.icon}
         </span>
-        {/* Live indicator */}
-        {good && (
+        {status.kind === 'safe' && (
           <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-emerald-500 ring-2 ring-white animate-pulse" />
         )}
       </div>
 
-      {/* Status label */}
-      <p
-        className={[
-          "text-2xl font-bold tracking-tight",
-          good ? "text-emerald-700" : "text-amber-700",
-        ].join(" ")}
-      >
-        {good ? "一切安好" : "建议问候"}
+      {/* Label */}
+      <p className={["text-2xl font-bold tracking-tight", style.text].join(" ")}>
+        {status.label}
       </p>
 
-      {/* Last checkin time */}
-      <p className="text-sm text-slate-400">
-        {lastCheckin
-          ? `最后信号：${relativeTime(lastCheckin)}`
-          : "还没有收到平安信号"}
-      </p>
+      {/* Subtext */}
+      <p className="text-sm text-slate-400">{status.subtext}</p>
+
+      {/* Dismiss — only on actionable statuses */}
+      {status.dismissible && (
+        <button
+          onClick={onDismiss}
+          className={[
+            "mt-1 text-xs px-4 py-1.5 rounded-full border transition-all active:scale-95",
+            style.text,
+            "border-current opacity-60 hover:opacity-100",
+          ].join(" ")}
+        >
+          已处理
+        </button>
+      )}
     </div>
   );
 }
@@ -198,8 +248,9 @@ export default function CarerDashboard() {
   const [pulse,        setPulse]        = useState(false);
   const [loading,      setLoading]      = useState(true);
   const [pageReady,    setPageReady]    = useState(false);
-  const [messages, setMessages] = useState<MessageRow[]>([]);
-  const [feed,     setFeed]     = useState<FeedItem[]>([]);
+  const [messages,    setMessages]    = useState<MessageRow[]>([]);
+  const [feed,        setFeed]        = useState<FeedItem[]>([]);
+  const [dismissedId, setDismissedId] = useState<string | null>(null);
 
   // Stable ref so realtime handler closure always has fresh seniorId
   const seniorIdRef = useRef<string | null>(null);
@@ -340,7 +391,7 @@ export default function CarerDashboard() {
     );
   }
 
-  const lastCheckin = checkins[0]?.checked_in_at ?? null;
+  const status = deriveStatus(feed, dismissedId);
 
   // ── Main ─────────────────────────────────────────────────────
 
@@ -364,9 +415,10 @@ export default function CarerDashboard() {
 
         {/* ── Status header ── */}
         <StatusHeader
-          lastCheckin={lastCheckin}
+          status={status}
           pulse={pulse}
           onPulseEnd={() => setPulse(false)}
+          onDismiss={() => setDismissedId(status.itemId)}
         />
 
         {/* ── Weather + AI insight ── */}

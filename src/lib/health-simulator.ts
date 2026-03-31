@@ -6,6 +6,10 @@
 // Also manages sleep_sessions:
 //   - Seeds a "last night" completed row on startup
 //   - During 22:00–06:00 Beijing time: upserts an active row and cycles current_state
+//
+// NOTE: All DB payloads are cast to Record<string,unknown> to bypass any PostgREST
+// schema-cache drift. If "column does not exist" errors persist, reload the schema
+// at: Supabase Dashboard → Settings → API → Reload schema cache.
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -76,12 +80,12 @@ async function seedLastNight(
         session_date:  yesterday,
         started_at:    startedAt,
         ended_at:      endedAt,
-        current_state: null,
+        current_state: null as unknown,   // explicit null — bypasses schema-cache type check
         total_hours:   6.5,
         deep_hours:    1.8,
         light_hours:   3.2,
         rem_hours:     1.5,
-      },
+      } as Record<string, unknown>,
       { onConflict: "senior_id,session_date", ignoreDuplicates: true },
     );
 
@@ -105,12 +109,12 @@ async function completeNightSession(
     .from("sleep_sessions")
     .update({
       ended_at:      new Date().toISOString(),
-      current_state: null,
+      current_state: null as unknown,
       total_hours:   7.0,
       deep_hours:    2.0,
       light_hours:   3.5,
       rem_hours:     1.5,
-    })
+    } as Record<string, unknown>)
     .eq("senior_id", seniorId)
     .eq("session_date", sessionDate)
     .is("ended_at", null);   // only update if still active
@@ -167,9 +171,9 @@ async function tickSleepState(
           senior_id:     seniorId,
           session_date:  anchorDate,
           started_at:    new Date().toISOString(),
-          ended_at:      null,
-          current_state: state,
-        },
+          ended_at:      null as unknown,
+          current_state: state as unknown,
+        } as Record<string, unknown>,
         { onConflict: "senior_id,session_date" },
       );
 
@@ -184,7 +188,7 @@ async function tickSleepState(
     // Subsequent ticks — only update current_state, using the stored session date
     const { error } = await supabase
       .from("sleep_sessions")
-      .update({ current_state: state })
+      .update({ current_state: state as unknown } as Record<string, unknown>)
       .eq("senior_id", seniorId)
       .eq("session_date", nightSessionDate);
 
@@ -220,22 +224,22 @@ export function startHealthSimulator(
 
     cumulativeSteps += Math.round(20 + Math.random() * 100);
 
-    // Insert heart_rate row
+    // Insert heart_rate row — explicit columns, cast to bypass schema-cache drift
     const { error: hrErr } = await supabase
       .from("health_metrics")
-      .insert({ senior_id: seniorId, metric_type: "heart_rate", value: heartRate, measured_at: now });
+      .insert({ senior_id: seniorId, metric_type: "heart_rate", value: heartRate, measured_at: now } as Record<string, unknown>);
 
     if (hrErr) {
-      console.error("[HealthSimulator] heart_rate insert failed:", hrErr.message, hrErr.details);
+      console.error("[HealthSimulator] heart_rate insert failed:", hrErr.message, hrErr.details, hrErr.hint);
     }
 
     // Insert steps row
     const { error: stepsErr } = await supabase
       .from("health_metrics")
-      .insert({ senior_id: seniorId, metric_type: "steps", value: cumulativeSteps, measured_at: now });
+      .insert({ senior_id: seniorId, metric_type: "steps", value: cumulativeSteps, measured_at: now } as Record<string, unknown>);
 
     if (stepsErr) {
-      console.error("[HealthSimulator] steps insert failed:", stepsErr.message, stepsErr.details);
+      console.error("[HealthSimulator] steps insert failed:", stepsErr.message, stepsErr.details, stepsErr.hint);
     }
 
     if (!hrErr && !stepsErr) {

@@ -138,8 +138,10 @@ interface SleepSession {
 type StatusKind = 'safe' | 'idle' | 'wechat' | 'call' | 'voice';
 
 // ── Watchdog thresholds ────────────────────────────────────────
-const DORMANT_MIN = 15;   // minutes — device asleep
-const OFFLINE_MIN = 60;   // minutes — connection lost
+// Demo values: 2 / 5 min — easy to test by stopping the simulator.
+// Production values: 15 / 60 min.
+const DORMANT_MIN = 2;    // minutes — device asleep
+const OFFLINE_MIN = 5;    // minutes — connection lost
 
 
 interface StatusInfo {
@@ -1007,9 +1009,10 @@ export default function CarerDashboard() {
       .finally(() => setWeatherLoad(false));
   }, []);
 
-  // Clock tick — keeps Beijing + local time displays current
+  // Clock tick — keeps Beijing + local time displays current,
+  // and re-evaluates watchdog staleness thresholds every 15s.
   useEffect(() => {
-    const id = setInterval(() => setClockTick((n) => n + 1), 30_000);
+    const id = setInterval(() => setClockTick((n) => n + 1), 15_000);
     return () => clearInterval(id);
   }, []);
 

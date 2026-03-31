@@ -245,7 +245,7 @@ export default function SeniorProfilePage() {
         <section className="rounded-3xl bg-white shadow-sm px-5 py-6">
           <div className="flex flex-col items-center gap-4">
             <div className="w-20 h-20 rounded-3xl bg-indigo-50 flex items-center justify-center">
-              <QrCode className="w-10 h-10 text-indigo-400" />
+              <QrCode className="w-10 h-10 text-indigo-500" />
             </div>
             <div className="text-center space-y-1">
               <p className="text-slate-700 font-semibold text-base">平安扣邀请二维码</p>
@@ -255,13 +255,14 @@ export default function SeniorProfilePage() {
             </div>
             <button
               type="button"
-              disabled
-              className="w-full rounded-2xl bg-indigo-100 py-4 text-sm font-semibold text-indigo-400 cursor-not-allowed flex items-center justify-center gap-2"
+              onClick={() => {
+                setToast("邀请二维码功能即将上线 🔜");
+              }}
+              className="w-full rounded-2xl bg-indigo-500 py-4 text-sm font-semibold text-white shadow-md shadow-indigo-100 active:scale-95 transition-transform flex items-center justify-center gap-2"
             >
               <QrCode className="w-4 h-4" />
               生成平安扣邀请二维码
             </button>
-            <span className="text-[11px] text-slate-300 bg-slate-50 px-3 py-1 rounded-full">功能即将上线</span>
           </div>
         </section>
 

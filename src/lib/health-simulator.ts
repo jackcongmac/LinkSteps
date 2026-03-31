@@ -7,9 +7,11 @@
 //   - Seeds a "last night" completed row on startup
 //   - During 22:00–06:00 Beijing time: upserts an active row and cycles current_state
 //
-// NOTE: All DB payloads are cast to Record<string,unknown> to bypass any PostgREST
-// schema-cache drift. If "column does not exist" errors persist, reload the schema
-// at: Supabase Dashboard → Settings → API → Reload schema cache.
+// All DB payloads use `as any` to hard-bypass the Supabase JS client's
+// schema-cache type narrowing.  This is intentional — the schema cache
+// on the PostgREST side may lag behind recent ALTER TABLE migrations.
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -72,7 +74,7 @@ async function seedLastNight(
   const startedAt = bjLocalToISO(yesterday, 22, 30);  // 22:30 BJ last night
   const endedAt   = bjLocalToISO(today,     6,  15);  // 06:15 BJ this morning
 
-  const { error } = await supabase
+  const { error } = await (supabase as any)
     .from("sleep_sessions")
     .upsert(
       {
@@ -80,17 +82,17 @@ async function seedLastNight(
         session_date:  yesterday,
         started_at:    startedAt,
         ended_at:      endedAt,
-        current_state: null as unknown,   // explicit null — bypasses schema-cache type check
+        current_state: null,
         total_hours:   6.5,
         deep_hours:    1.8,
         light_hours:   3.2,
         rem_hours:     1.5,
-      } as Record<string, unknown>,
+      },
       { onConflict: "senior_id,session_date", ignoreDuplicates: true },
     );
 
   if (error) {
-    console.error("[HealthSimulator] sleep seed failed:", error.message);
+    console.error("[HealthSimulator] sleep seed failed:", error.message, error.details, error.hint);
   } else {
     console.log("[HealthSimulator] ✓ sleep seed: last night 6.5h (deep 1.8 / light 3.2 / REM 1.5)");
   }
@@ -105,22 +107,22 @@ async function completeNightSession(
   seniorId: string,
   sessionDate: string,
 ): Promise<void> {
-  const { error } = await supabase
+  const { error } = await (supabase as any)
     .from("sleep_sessions")
     .update({
       ended_at:      new Date().toISOString(),
-      current_state: null as unknown,
+      current_state: null,
       total_hours:   7.0,
       deep_hours:    2.0,
       light_hours:   3.5,
       rem_hours:     1.5,
-    } as Record<string, unknown>)
+    })
     .eq("senior_id", seniorId)
     .eq("session_date", sessionDate)
     .is("ended_at", null);   // only update if still active
 
   if (error) {
-    console.error("[HealthSimulator] sleep complete failed:", error.message);
+    console.error("[HealthSimulator] sleep complete failed:", error.message, error.details, error.hint);
   } else {
     console.log("[HealthSimulator] ✓ sleep session completed");
   }
@@ -164,21 +166,21 @@ async function tickSleepState(
 
   if (!nightSessionLive) {
     // First tick of this night — INSERT (or upsert) with started_at
-    const { error } = await supabase
+    const { error } = await (supabase as any)
       .from("sleep_sessions")
       .upsert(
         {
           senior_id:     seniorId,
           session_date:  anchorDate,
           started_at:    new Date().toISOString(),
-          ended_at:      null as unknown,
-          current_state: state as unknown,
-        } as Record<string, unknown>,
+          ended_at:      null,
+          current_state: state,
+        },
         { onConflict: "senior_id,session_date" },
       );
 
     if (error) {
-      console.error("[HealthSimulator] sleep tick (start) failed:", error.message);
+      console.error("[HealthSimulator] sleep tick (start) failed:", error.message, error.details, error.hint);
     } else {
       nightSessionLive = true;
       nightSessionDate = anchorDate;   // store so post-midnight ticks use the right date
@@ -186,14 +188,14 @@ async function tickSleepState(
     }
   } else {
     // Subsequent ticks — only update current_state, using the stored session date
-    const { error } = await supabase
+    const { error } = await (supabase as any)
       .from("sleep_sessions")
-      .update({ current_state: state as unknown } as Record<string, unknown>)
+      .update({ current_state: state })
       .eq("senior_id", seniorId)
       .eq("session_date", nightSessionDate);
 
     if (error) {
-      console.error("[HealthSimulator] sleep tick (update) failed:", error.message);
+      console.error("[HealthSimulator] sleep tick (update) failed:", error.message, error.details, error.hint);
     } else {
       console.log(`[HealthSimulator] ✓ sleep state: ${state}`);
     }
@@ -224,19 +226,19 @@ export function startHealthSimulator(
 
     cumulativeSteps += Math.round(20 + Math.random() * 100);
 
-    // Insert heart_rate row — explicit columns, cast to bypass schema-cache drift
-    const { error: hrErr } = await supabase
+    // Insert heart_rate row — cast to any to hard-bypass schema-cache validation
+    const { error: hrErr } = await (supabase as any)
       .from("health_metrics")
-      .insert({ senior_id: seniorId, metric_type: "heart_rate", value: heartRate, measured_at: now } as Record<string, unknown>);
+      .insert({ senior_id: seniorId, metric_type: "heart_rate", value: heartRate, measured_at: now });
 
     if (hrErr) {
       console.error("[HealthSimulator] heart_rate insert failed:", hrErr.message, hrErr.details, hrErr.hint);
     }
 
     // Insert steps row
-    const { error: stepsErr } = await supabase
+    const { error: stepsErr } = await (supabase as any)
       .from("health_metrics")
-      .insert({ senior_id: seniorId, metric_type: "steps", value: cumulativeSteps, measured_at: now } as Record<string, unknown>);
+      .insert({ senior_id: seniorId, metric_type: "steps", value: cumulativeSteps, measured_at: now });
 
     if (stepsErr) {
       console.error("[HealthSimulator] steps insert failed:", stepsErr.message, stepsErr.details, stepsErr.hint);

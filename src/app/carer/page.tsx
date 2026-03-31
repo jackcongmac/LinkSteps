@@ -113,7 +113,7 @@ interface HealthRow {
   senior_id:   string;
   metric_type: string;   // 'heart_rate' | 'steps'
   value:       number;
-  recorded_at: string;
+  measured_at: string;
 }
 
 interface HealthData {
@@ -673,7 +673,8 @@ export default function CarerDashboard() {
         .select("metric_type, value")
         .eq("senior_id", id)
         .in("metric_type", ["heart_rate", "steps"])
-        .limit(10);   // no ORDER BY — avoids column-name assumption
+        .order("measured_at", { ascending: false })
+        .limit(10);
 
       if (healthRows) {
         const hrRow    = (healthRows as { metric_type: string; value: number }[])
@@ -848,12 +849,11 @@ export default function CarerDashboard() {
   const status = deriveStatus(feed, dismissedId);
 
   // Wellness score — recomputes whenever health or weather updates
-  // Sleep data: placeholder 6.5h until a sleep API is wired in
   const wellness: WellnessResult | null = (healthData || bjWeather) ? calculateSeniorWellness({
     pressure:  bjWeather?.pressure,
     steps:     healthData?.steps,
     heartRate: healthData?.heartRate,
-    sleep:     sleepSession?.total_hours ?? 6.5,
+    sleep:     sleepSession?.total_hours ?? 6.5,   // falls back to 6.5h if no sleep_session row exists yet
   }) : null;
 
   // ── Main ─────────────────────────────────────────────────────

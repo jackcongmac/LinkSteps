@@ -465,6 +465,144 @@ function StatusHeader({ status, pulse, onPulseEnd, onDismiss, healthData }: Stat
   );
 }
 
+// ── SleepInsightsCard helpers ─────────────────────────────────
+
+function SleepStateChip({ state }: { state: 'awake' | 'light' | 'deep' | null }) {
+  if (!state) return <span className="text-slate-500 text-sm">--</span>;
+
+  const config: Record<
+    'awake' | 'light' | 'deep',
+    { label: string; cls: string; animate: boolean }
+  > = {
+    deep:  {
+      label: '正在深睡',
+      cls:   'bg-indigo-500/40 text-indigo-200 ring-1 ring-indigo-400/50',
+      animate: true,
+    },
+    light: {
+      label: '浅睡中',
+      cls:   'bg-sky-500/30 text-sky-200',
+      animate: false,
+    },
+    awake: {
+      label: '尚未入睡',
+      cls:   'bg-slate-700 text-slate-400',
+      animate: false,
+    },
+  };
+
+  const c = config[state];
+  return (
+    <span
+      className={["px-4 py-2 rounded-full text-base font-medium", c.cls].join(" ")}
+      style={c.animate ? { animation: 'breathe 4s ease-in-out infinite' } : undefined}
+    >
+      {c.label}
+    </span>
+  );
+}
+
+function SleepBreakdownBar({ session }: { session: SleepSession }) {
+  const total = session.total_hours ?? 0;
+  if (total === 0) return null;
+
+  const deepPct  = (((session.deep_hours  ?? 0) / total) * 100).toFixed(1);
+  const lightPct = (((session.light_hours ?? 0) / total) * 100).toFixed(1);
+  const remPct   = (((session.rem_hours   ?? 0) / total) * 100).toFixed(1);
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="flex h-2.5 rounded-full overflow-hidden bg-slate-700">
+        <div className="bg-indigo-400 transition-all" style={{ width: `${deepPct}%` }} />
+        <div className="bg-sky-400 transition-all"    style={{ width: `${lightPct}%` }} />
+        <div className="bg-violet-400 transition-all" style={{ width: `${remPct}%` }} />
+      </div>
+      <div className="flex gap-2 text-[11px] text-slate-400">
+        <span>深睡 {session.deep_hours?.toFixed(1)}h</span>
+        <span>·</span>
+        <span>浅睡 {session.light_hours?.toFixed(1)}h</span>
+        <span>·</span>
+        <span>REM {session.rem_hours?.toFixed(1)}h</span>
+      </div>
+    </div>
+  );
+}
+
+// ── SleepInsightsCard ─────────────────────────────────────────
+
+interface SleepInsightsCardProps {
+  session: SleepSession | null;
+}
+
+function SleepInsightsCard({ session }: SleepInsightsCardProps) {
+  const isNightWatch     = session !== null && session.ended_at === null;
+  const isMorningSummary = session !== null && session.ended_at !== null;
+
+  const startedAtBj = session?.started_at
+    ? new Date(session.started_at).toLocaleString("zh-CN", {
+        timeZone: "Asia/Shanghai",
+        hour:     "2-digit",
+        minute:   "2-digit",
+        hour12:   false,
+      })
+    : null;
+
+  const deepWarn = isMorningSummary && (session.deep_hours ?? 0) < 1.5;
+
+  return (
+    <div
+      className="rounded-3xl shadow-lg px-5 py-5 flex flex-col gap-4 relative overflow-hidden"
+      style={{ background: 'linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%)' }}
+    >
+      {/* Stars decoration */}
+      <span className="absolute top-3 right-6  w-1   h-1   rounded-full bg-white opacity-70" />
+      <span className="absolute top-6 right-12 w-0.5 h-0.5 rounded-full bg-white opacity-40" />
+      <span className="absolute top-4 right-20 w-1   h-1   rounded-full bg-white opacity-50" />
+      <span className="absolute top-8 right-8  w-0.5 h-0.5 rounded-full bg-white opacity-30" />
+
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="text-xl">🌙</span>
+          <p className="text-white font-semibold text-base">
+            {isNightWatch ? '夜间监测' : '昨晚睡眠'}
+          </p>
+        </div>
+        {isNightWatch && (
+          <span className="text-[11px] font-medium px-2.5 py-1 rounded-full border border-indigo-400/50 text-indigo-200">
+            实时睡眠状态
+          </span>
+        )}
+      </div>
+
+      {/* Body */}
+      {!session ? (
+        <p className="text-slate-500 text-sm">暂无睡眠数据</p>
+      ) : isNightWatch ? (
+        <div className="flex flex-col items-center gap-3 py-2">
+          <SleepStateChip state={session.current_state} />
+          {startedAtBj && (
+            <p className="text-slate-400 text-xs">入睡时间 {startedAtBj}</p>
+          )}
+        </div>
+      ) : (
+        <div className="flex flex-col gap-3">
+          <p className={["text-2xl font-bold", deepWarn ? "text-amber-300" : "text-white"].join(" ")}>
+            昨晚总睡眠: {session.total_hours?.toFixed(1)}小时
+            {deepWarn && <span className="ml-2 text-sm font-normal text-amber-400">深睡不足</span>}
+          </p>
+          <SleepBreakdownBar session={session} />
+        </div>
+      )}
+
+      {/* Footer */}
+      <p className="text-[10px] text-slate-600 text-right -mt-1">
+        基于睡眠模拟数据 · Huawei Health 接入后自动更新
+      </p>
+    </div>
+  );
+}
+
 // ── WellnessCard ──────────────────────────────────────────────
 
 const LEVEL_STYLE = {
@@ -895,6 +1033,9 @@ export default function CarerDashboard() {
           onDismiss={() => setDismissedId(status.itemId)}
           healthData={healthData}
         />
+
+        {/* ── Sleep insights (Vitals Cluster) ── */}
+        <SleepInsightsCard session={sleepSession} />
 
         {/* ── AI wellness analysis ── */}
         <WellnessCard wellness={wellness} loading={bjWeatherLoad && !healthData} />

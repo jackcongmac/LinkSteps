@@ -67,8 +67,6 @@ export default function VoiceRecorder({ seniorId }: Props) {
         return;
       }
 
-      console.log("[VoiceRecorder] upload OK →", path);
-
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
         console.error("[VoiceRecorder] insert skipped — user is null (session expired?)");
@@ -94,7 +92,6 @@ export default function VoiceRecorder({ seniorId }: Props) {
         return;
       }
 
-      console.log("[VoiceRecorder] insert OK, messageId:", messageId);
       setTimeout(() => { setRecState("idle"); setSeconds(0); }, 3000);
     };
 

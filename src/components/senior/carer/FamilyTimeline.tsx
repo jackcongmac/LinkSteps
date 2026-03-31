@@ -1,7 +1,8 @@
 // src/components/senior/carer/FamilyTimeline.tsx
 "use client";
 
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, useMemo } from "react";
+import { createClient } from "@/lib/supabase";
 import type { FeedItem } from "@/types/messages";
 
 function relativeTime(iso: string): string {
@@ -22,43 +23,54 @@ function absoluteHHMM(iso: string): string {
   return `${hh}:${mm}`;
 }
 
+// ── VoicePlayButton ───────────────────────────────────────────
+
 interface VoicePlayButtonProps {
-  messageId: string;
+  audioUrl: string;          // storage path, e.g. "<seniorId>/<uuid>.webm"
 }
 
-function VoicePlayButton({ messageId }: VoicePlayButtonProps) {
-  const [loading,  setLoading]  = useState(false);
-  const [audioUrl, setAudioUrl] = useState<string | null>(null);
-  const [playing,  setPlaying]  = useState(false);
+function VoicePlayButton({ audioUrl }: VoicePlayButtonProps) {
+  const [loading,   setLoading]   = useState(false);
+  const [signedUrl, setSignedUrl] = useState<string | null>(null);
+  const [playing,   setPlaying]   = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const supabase = useMemo(() => createClient(), []);
 
   const handlePlay = useCallback(async () => {
     if (loading) return;
 
-    if (audioUrl && audioRef.current) {
-      audioRef.current.play();
+    // Already have a signed URL — just (re)play
+    if (signedUrl && audioRef.current) {
+      audioRef.current.play().catch(() => null);
       setPlaying(true);
       return;
     }
 
+    // Generate a 60-second signed URL directly client-side
     setLoading(true);
-    const res = await fetch(`/api/senior/voice-url?messageId=${messageId}`);
+    const { data, error } = await supabase.storage
+      .from("voice-memos")
+      .createSignedUrl(audioUrl, 60);
     setLoading(false);
 
-    if (!res.ok) {
-      console.error("[VoicePlayButton] fetch failed:", res.status);
+    if (error || !data?.signedUrl) {
+      console.error(
+        "[VoicePlayButton] createSignedUrl failed:",
+        error?.message ?? "no signedUrl returned",
+        "| path:", audioUrl,
+      );
       return;
     }
 
-    const { url } = (await res.json()) as { url: string; mimeType: string };
-    setAudioUrl(url);
-  }, [messageId, loading, audioUrl]);
+    setSignedUrl(data.signedUrl);
+  }, [audioUrl, loading, signedUrl, supabase]);
 
+  // Auto-play once the signed URL lands
   useEffect(() => {
-    if (audioUrl && audioRef.current && !playing) {
+    if (signedUrl && audioRef.current && !playing) {
       audioRef.current.play().then(() => setPlaying(true)).catch(() => null);
     }
-  }, [audioUrl]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [signedUrl]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="flex items-center gap-2">
@@ -75,10 +87,10 @@ function VoicePlayButton({ messageId }: VoicePlayButtonProps) {
         {loading ? "加载中…" : playing ? "播放中" : "播放"}
       </button>
 
-      {audioUrl && (
+      {signedUrl && (
         <audio
           ref={audioRef}
-          src={audioUrl}
+          src={signedUrl}
           onEnded={() => setPlaying(false)}
           className="hidden"
         />
@@ -86,6 +98,8 @@ function VoicePlayButton({ messageId }: VoicePlayButtonProps) {
     </div>
   );
 }
+
+// ── FamilyTimeline ────────────────────────────────────────────
 
 interface Props {
   items: FeedItem[];
@@ -112,10 +126,15 @@ export default function FamilyTimeline({ items }: Props) {
               <div className="absolute left-[9px] top-5 bottom-0 w-px bg-slate-100" />
             )}
 
+            {/* Timeline dot */}
             <div
               className={[
-                "relative z-10 mt-1 w-5 h-5 rounded-full shrink-0 flex items-center justify-center text-[10px]",
-                isFirst ? "bg-emerald-500 ring-4 ring-emerald-100" : "bg-slate-200",
+                "relative z-10 mt-1 w-5 h-5 rounded-full shrink-0 flex items-center justify-center",
+                item.kind === "wechat_request"
+                  ? isFirst ? "bg-emerald-500 ring-4 ring-emerald-100" : "bg-emerald-200"
+                  : item.kind === "call_request"
+                  ? isFirst ? "bg-amber-400 ring-4 ring-amber-100"   : "bg-amber-200"
+                  : isFirst ? "bg-emerald-500 ring-4 ring-emerald-100" : "bg-slate-200",
               ].join(" ")}
             >
               {isFirst && <div className="w-2 h-2 rounded-full bg-white" />}
@@ -162,7 +181,7 @@ export default function FamilyTimeline({ items }: Props) {
                   <p className={["text-sm font-medium", isFirst ? "text-emerald-700" : "text-slate-600"].join(" ")}>
                     {item.sender_role === "senior" ? "🎙 妈妈发来一段语音" : "🎙 你发了一段语音"}
                   </p>
-                  <VoicePlayButton messageId={item.id} />
+                  <VoicePlayButton audioUrl={item.audio_url} />
                   <p className="text-xs text-slate-400">
                     {relativeTime(item.created_at)}
                     <span className="mx-1.5 opacity-40">·</span>

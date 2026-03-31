@@ -35,11 +35,6 @@ function getYesterdayBj(): string {
   return `${y}-${mo}-${dd}`;
 }
 
-function bjLocalToISO(dateStr: string, hh: number, mm: number): string {
-  const [y, mo, dd] = dateStr.split("-").map(Number);
-  return new Date(Date.UTC(y, mo - 1, dd, hh - 8, mm)).toISOString();
-}
-
 // ── Sleep simulator ───────────────────────────────────────────
 
 let sleepStateIdx    = 0;
@@ -47,18 +42,15 @@ let nightSessionLive = false;
 let nightSessionDate = "";
 
 /**
- * Seeds a completed "last night" row — only columns the schema cache knows about.
- * current_state / ended_at omitted until PostgREST cache is refreshed.
+ * Seeds a completed "last night" row — only original table columns used.
+ * started_at / ended_at / current_state omitted (not in PostgREST schema cache).
+ * Always overwrites so stale/partial rows from prior failed attempts get fixed.
  */
 async function seedLastNight(
   supabase: SupabaseClient,
   seniorId: string,
 ): Promise<void> {
-  const yesterday          = getYesterdayBj();
-  const { dateStr: today } = getBjDate();
-
-  const startedAt = bjLocalToISO(yesterday, 22, 30);
-  const endedAt   = bjLocalToISO(today,      6, 15);
+  const yesterday = getYesterdayBj();
 
   const { error } = await (supabase as any)
     .from("sleep_sessions")
@@ -66,21 +58,18 @@ async function seedLastNight(
       {
         senior_id:    seniorId,
         session_date: yesterday,
-        started_at:   startedAt,
-        ended_at:     endedAt,       // timestamptz — safe if column exists
-        total_hours:  6.5,
-        deep_hours:   1.8,
-        light_hours:  3.2,
-        rem_hours:    1.5,
+        total_hours:  7.33,   // 7h 20m
+        deep_hours:   2.17,   // 2h 10m
+        light_hours:  4.0,
+        rem_hours:    1.17,   // 1h 10m
       },
-      { onConflict: "senior_id,session_date", ignoreDuplicates: true },
+      { onConflict: "senior_id,session_date" },   // always overwrite
     );
 
   if (error) {
-    // Warn only — never console.error (prevents Next.js red overlay)
     console.warn("[HealthSimulator] sleep seed skipped:", error.message);
   } else {
-    console.log("[HealthSimulator] ✓ sleep seed: last night 6.5h");
+    console.log("[HealthSimulator] ✓ sleep seed: last night 7.3h");
   }
 }
 

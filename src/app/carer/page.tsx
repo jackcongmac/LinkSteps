@@ -602,7 +602,22 @@ function SleepInsightsCard({ session }: SleepInsightsCardProps) {
 
       {/* Body */}
       {!session ? (
-        <p className="text-slate-500 text-sm">暂无睡眠数据</p>
+        <div className="flex flex-col gap-3 py-1">
+          {/* Sync skeleton */}
+          <div className="flex items-center gap-2">
+            <span className="w-3 h-3 rounded-full border-2 border-indigo-400/40 border-t-indigo-300 animate-spin flex-shrink-0" />
+            <span className="text-slate-400 text-sm">正在同步睡眠数据…</span>
+          </div>
+          {/* Skeleton bars */}
+          <div className="flex h-2 rounded-full overflow-hidden bg-slate-700/60 animate-pulse" />
+          <div className="flex gap-2 text-[11px] text-slate-600">
+            <span>深睡 --</span>
+            <span>·</span>
+            <span>浅睡 --</span>
+            <span>·</span>
+            <span>REM --</span>
+          </div>
+        </div>
       ) : isNightWatch ? (
         <div className="flex flex-col items-center gap-3 py-2">
           {/* current_state not available until schema cache is refreshed — show neutral chip */}
@@ -873,7 +888,7 @@ export default function CarerDashboard() {
       const ydd = String(bjYesterday.getDate()).padStart(2, "0");
       const yesterdayStr = `${yy}-${ymm}-${ydd}`;
 
-      await (supabase as any)
+      const { error: sleepSeedErr } = await (supabase as any)
         .from("sleep_sessions")
         .upsert(
           {
@@ -884,8 +899,13 @@ export default function CarerDashboard() {
             light_hours:  4.0,
             rem_hours:    1.17,   // 1h 10m
           },
-          { onConflict: "senior_id,session_date" },  // always overwrite demo row
+          { onConflict: "senior_id,session_date" },
         );
+      if (sleepSeedErr) {
+        console.warn("[carer] sleep seed upsert failed:", sleepSeedErr.message, sleepSeedErr.code);
+      } else {
+        console.log("[carer] ✓ sleep seed upsert OK:", yesterdayStr);
+      }
 
       // ── Query most recent sleep session (no cutoff — just ORDER + LIMIT) ─
       const { data: sleepRows, error: sleepError } = await supabase

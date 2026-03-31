@@ -124,7 +124,7 @@ interface HealthData {
 
 interface SleepSession {
   id:            string;
-  start_time:    string | null;
+  started_at:    string | null;
   ended_at:      string | null;
   current_state: 'awake' | 'light' | 'deep' | null;
   total_hours:   number | null;
@@ -136,6 +136,11 @@ interface SleepSession {
 // ── Status derivation ─────────────────────────────────────────
 
 type StatusKind = 'safe' | 'idle' | 'wechat' | 'call' | 'voice';
+
+// ── Watchdog thresholds ────────────────────────────────────────
+const DORMANT_MIN = 15;   // minutes — device asleep
+const OFFLINE_MIN = 60;   // minutes — connection lost
+
 
 interface StatusInfo {
   kind:        StatusKind;
@@ -187,18 +192,34 @@ function deriveStatus(feed: FeedItem[], dismissedId: string | null): StatusInfo 
 // ── StatusHeader ──────────────────────────────────────────────
 
 interface StatusHeaderProps {
-  status:     StatusInfo;
-  pulse:      boolean;
-  onPulseEnd: () => void;
-  onDismiss:  () => void;
-  healthData: HealthData | null;
+  status:       StatusInfo;
+  pulse:        boolean;
+  onPulseEnd:   () => void;
+  onDismiss:    () => void;
+  healthData:   HealthData | null;
+  lastMetricAt: string | null;
 }
 
-function StatusHeader({ status, pulse, onPulseEnd, onDismiss, healthData }: StatusHeaderProps) {
-  const isAnomaly = (healthData?.heartRate ?? 0) > 120;
-  const style     = isAnomaly
-    ? { bg: 'bg-red-50 border-red-200', text: 'text-red-700', dot: 'bg-red-100', ring: 'border-red-400', spin: 'border-t-red-600' }
+function StatusHeader({ status, pulse, onPulseEnd, onDismiss, healthData, lastMetricAt }: StatusHeaderProps) {
+  // ── Watchdog: staleness derived from last health metric ──────
+  const minutesSinceMetric = lastMetricAt
+    ? (Date.now() - new Date(lastMetricAt).getTime()) / 60_000
+    : null;
+  const isDormant = minutesSinceMetric !== null && minutesSinceMetric >= DORMANT_MIN && minutesSinceMetric < OFFLINE_MIN;
+  const isOffline = minutesSinceMetric !== null && minutesSinceMetric >= OFFLINE_MIN;
+
+  // Anomaly only meaningful when signal is fresh
+  const isAnomaly = !isDormant && !isOffline && (healthData?.heartRate ?? 0) > 120;
+
+  const style = isAnomaly
+    ? { bg: 'bg-red-50 border-red-200',     text: 'text-red-700',   dot: 'bg-red-100',   ring: 'border-red-400',   spin: 'border-t-red-600'   }
+    : isOffline
+    ? { bg: 'bg-amber-50 border-amber-100', text: 'text-amber-600', dot: 'bg-amber-100', ring: 'border-amber-300', spin: 'border-t-amber-500' }
+    : isDormant
+    ? { bg: 'bg-slate-50 border-slate-200', text: 'text-slate-500', dot: 'bg-slate-100', ring: 'border-slate-300', spin: 'border-t-slate-400' }
     : STATUS_STYLE[status.kind];
+
+  const staleMins   = minutesSinceMetric !== null ? Math.round(minutesSinceMetric) : 0;
   const isVoice   = status.kind === 'voice' && !isAnomaly;
 
   // Breathing speed synced to BPM: 72 bpm → ~2.5 s, 120 bpm → 1.5 s
@@ -347,21 +368,26 @@ function StatusHeader({ status, pulse, onPulseEnd, onDismiss, healthData }: Stat
               <Play className="w-8 h-8 text-purple-600 translate-x-0.5" />
             )}
           </button>
+        ) : isOffline ? (
+          /* Offline — show '--' text in the circle */
+          <span className={["w-20 h-20 rounded-full flex items-center justify-center font-bold text-3xl", style.dot, style.text].join(" ")}>
+            --
+          </span>
         ) : (
           <span
             className={[
               "w-20 h-20 rounded-full flex items-center justify-center text-4xl",
               style.dot,
-              (status.kind === 'safe' || isAnomaly)
+              (status.kind === 'safe' || isAnomaly) && !isDormant
                 ? "animate-[breathe_4s_ease-in-out_infinite]"
                 : "",
             ].join(" ")}
             style={{ animationDuration: breatheDuration }}
           >
-            {isAnomaly ? "❤️" : status.icon}
+            {isAnomaly ? "❤️" : isDormant ? "💤" : status.icon}
           </span>
         )}
-        {(status.kind === 'safe' && !isAnomaly) && (
+        {(status.kind === 'safe' && !isAnomaly && !isDormant && !isOffline) && (
           <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-emerald-500 ring-2 ring-white animate-pulse" />
         )}
         {isAnomaly && (
@@ -371,7 +397,7 @@ function StatusHeader({ status, pulse, onPulseEnd, onDismiss, healthData }: Stat
 
       {/* Label */}
       <p className={["text-2xl font-bold tracking-tight", style.text].join(" ")}>
-        {isAnomaly ? "心率异常！" : status.label}
+        {isOffline ? '信号断开' : isDormant ? '平安扣休眠中' : isAnomaly ? '心率异常！' : status.label}
       </p>
 
       {/* Voice: elapsed / total timestamps */}
@@ -383,25 +409,29 @@ function StatusHeader({ status, pulse, onPulseEnd, onDismiss, healthData }: Stat
       ) : (
         <>
           <p className={["text-sm", isAnomaly ? "text-red-400" : "text-slate-400"].join(" ")}>
-            {isAnomaly
+            {isOffline
+              ? `${staleMins} 分钟未收到信号`
+              : isDormant
+              ? `${staleMins} 分钟无动态`
+              : isAnomaly
               ? `当前心率 ${healthData!.heartRate} 次/分，请立即确认`
               : status.subtext}
           </p>
 
-          {/* ── Health snapshot (safe / idle / anomaly) ── */}
-          {(status.kind === 'safe' || status.kind === 'idle' || isAnomaly) && (
+          {/* ── Health snapshot (safe / idle / dormant / offline / anomaly) ── */}
+          {(status.kind === 'safe' || status.kind === 'idle' || isAnomaly || isDormant || isOffline) && (
             <div className="w-full flex items-center justify-center gap-6 pt-2 pb-0.5">
               {/* Steps */}
               <div className="flex flex-col items-center gap-0.5">
                 <div className="flex items-baseline gap-0.5">
-                  <span className={["text-2xl font-bold", isAnomaly ? "text-red-400" : "text-emerald-500"].join(" ")}>
-                    {healthData ? healthData.steps.toLocaleString() : "--"}
+                  <span className={["text-2xl font-bold", isAnomaly ? "text-red-400" : isOffline || isDormant ? "text-slate-400" : "text-emerald-500"].join(" ")}>
+                    {isOffline ? "--" : healthData ? healthData.steps.toLocaleString() : "--"}
                   </span>
-                  <span className={["text-xs font-medium mb-0.5", isAnomaly ? "text-red-300" : "text-emerald-400"].join(" ")}>步</span>
+                  {!isOffline && <span className={["text-xs font-medium mb-0.5", isAnomaly ? "text-red-300" : isDormant ? "text-slate-400" : "text-emerald-400"].join(" ")}>步</span>}
                 </div>
                 <div className="flex items-center gap-1">
                   <span className="text-xs text-slate-400">步数</span>
-                  <span className={["text-[10px] font-medium", isAnomaly ? "text-red-400" : "text-emerald-400"].join(" ")}>↑ 今日</span>
+                  {!isOffline && !isDormant && <span className={["text-[10px] font-medium", isAnomaly ? "text-red-400" : "text-emerald-400"].join(" ")}>↑ 今日</span>}
                 </div>
               </div>
 
@@ -410,15 +440,15 @@ function StatusHeader({ status, pulse, onPulseEnd, onDismiss, healthData }: Stat
               {/* Heart rate */}
               <div className="flex flex-col items-center gap-0.5">
                 <div className="flex items-baseline gap-0.5">
-                  <span className={["text-2xl font-bold", isAnomaly ? "text-red-500" : "text-emerald-500"].join(" ")}>
-                    {healthData ? healthData.heartRate : "--"}
+                  <span className={["text-2xl font-bold", isAnomaly ? "text-red-500" : isOffline || isDormant ? "text-slate-400" : "text-emerald-500"].join(" ")}>
+                    {isOffline ? "--" : healthData ? healthData.heartRate : "--"}
                   </span>
-                  <span className={["text-xs font-medium mb-0.5", isAnomaly ? "text-red-400" : "text-emerald-400"].join(" ")}>次/分</span>
+                  {!isOffline && <span className={["text-xs font-medium mb-0.5", isAnomaly ? "text-red-400" : isDormant ? "text-slate-400" : "text-emerald-400"].join(" ")}>次/分</span>}
                 </div>
                 <div className="flex items-center gap-1">
                   <span className="text-xs text-slate-400">心率</span>
-                  <span className={["text-[10px] font-medium", isAnomaly ? "text-red-500 animate-pulse" : "text-emerald-400"].join(" ")}>
-                    {isAnomaly ? "⚠ 偏高" : "● 正常"}
+                  <span className={["text-[10px] font-medium", isAnomaly ? "text-red-500 animate-pulse" : isOffline ? "text-amber-400" : isDormant ? "text-slate-400" : "text-emerald-400"].join(" ")}>
+                    {isAnomaly ? "⚠ 偏高" : isOffline ? "× 断开" : isDormant ? "○ 休眠" : "● 正常"}
                   </span>
                 </div>
               </div>
@@ -538,11 +568,11 @@ interface SleepInsightsCardProps {
 }
 
 function SleepInsightsCard({ session }: SleepInsightsCardProps) {
-  const isNightWatch     = session !== null && session.ended_at === null && session.start_time !== null;
+  const isNightWatch     = session !== null && session.ended_at === null && session.started_at !== null;
   const isMorningSummary = session !== null && session.ended_at !== null;
 
-  const startedAtBj = session?.start_time
-    ? new Date(session.start_time).toLocaleString("zh-CN", {
+  const startedAtBj = session?.started_at
+    ? new Date(session.started_at).toLocaleString("zh-CN", {
         timeZone: "Asia/Shanghai",
         hour:     "2-digit",
         minute:   "2-digit",
@@ -761,6 +791,7 @@ export default function CarerDashboard() {
   const [feed,        setFeed]        = useState<FeedItem[]>([]);
   const [dismissedId, setDismissedId] = useState<string | null>(null);
   const [healthData,   setHealthData]   = useState<HealthData | null>(null);
+  const [lastMetricAt, setLastMetricAt] = useState<string | null>(null);
   const [sleepSession, setSleepSession] = useState<SleepSession | null>(null);
   const [bjWeather,    setBjWeather]    = useState<WeatherPayload | null>(null);
   const [bjWeatherLoad,setBjWeatherLoad]= useState(true);
@@ -813,25 +844,30 @@ export default function CarerDashboard() {
 
       setMessages((msgRows as MessageRow[]) ?? []);
 
-      // Latest heart_rate + steps rows (vertical schema: metric_type / value)
+      // Latest heart_rate + steps rows (vertical schema: metric_type / value / measured_at)
       const { data: healthRows } = await supabase
         .from("health_metrics")
-        .select("metric_type, value")
+        .select("metric_type, value, measured_at")
         .eq("senior_id", id)
         .in("metric_type", ["heart_rate", "steps"])
         .order("measured_at", { ascending: false })
         .limit(10);
 
       if (healthRows) {
-        const hrRow    = (healthRows as { metric_type: string; value: number }[])
-          .find((r) => r.metric_type === "heart_rate");
-        const stepsRow = (healthRows as { metric_type: string; value: number }[])
-          .find((r) => r.metric_type === "steps");
+        type HealthRowRaw = { metric_type: string; value: number; measured_at: string };
+        const rows  = healthRows as HealthRowRaw[];
+        const hrRow    = rows.find((r) => r.metric_type === "heart_rate");
+        const stepsRow = rows.find((r) => r.metric_type === "steps");
         if (hrRow || stepsRow) {
           setHealthData({
             heartRate: hrRow?.value    ?? 75,
             steps:     stepsRow?.value ?? 0,
           });
+        }
+        // Track most recent metric time for watchdog
+        if (rows.length > 0) {
+          const newest = rows.reduce((a, b) => a.measured_at > b.measured_at ? a : b);
+          setLastMetricAt(newest.measured_at);
         }
       }
 
@@ -844,10 +880,10 @@ export default function CarerDashboard() {
 
       const { data: sleepRows, error: sleepError } = await supabase
         .from("sleep_sessions")
-        .select("id, start_time, ended_at, current_state, total_hours, deep_hours, light_hours, rem_hours")
+        .select("id, started_at, ended_at, current_state, total_hours, deep_hours, light_hours, rem_hours")
         .eq("senior_id", id)
-        .gte("start_time", cutoffISO)
-        .order("start_time", { ascending: false })
+        .gte("started_at", cutoffISO)
+        .order("started_at", { ascending: false })
         .limit(1);
 
       if (sleepError) {
@@ -932,6 +968,8 @@ export default function CarerDashboard() {
             if (row.metric_type === "steps")      return { ...base, steps:     row.value };
             return base;
           });
+          // Update watchdog timestamp on every incoming metric
+          if (row.measured_at) setLastMetricAt(row.measured_at);
         },
       )
       .on(
@@ -1050,6 +1088,7 @@ export default function CarerDashboard() {
           onPulseEnd={() => setPulse(false)}
           onDismiss={() => setDismissedId(status.itemId)}
           healthData={healthData}
+          lastMetricAt={lastMetricAt}
         />
 
         {/* ── Sleep insights (Vitals Cluster) ── */}

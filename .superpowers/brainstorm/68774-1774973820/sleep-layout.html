@@ -1,0 +1,49 @@
+<h2>Sleep Insights — Where should it live on the dashboard?</h2>
+<p class="subtitle">Current layout: Header → StatusHeader → WellnessCard → WeatherCard → Timeline. Pick where the Sleep card fits.</p>
+
+<div class="cards">
+
+  <!-- Option A -->
+  <div class="card" data-choice="a" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding:16px;background:#f8fafc;font-size:12px;line-height:1.8;color:#475569">
+      <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:12px;padding:8px 10px;margin-bottom:6px;font-weight:600;color:#166534">🔔 StatusHeader — 脉冲 / 心率</div>
+      <div style="background:#eef2ff;border:2px solid #818cf8;border-radius:12px;padding:8px 10px;margin-bottom:6px;font-weight:700;color:#3730a3">🌙 睡眠洞察 ← NEW (right after vitals)</div>
+      <div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:8px 10px;margin-bottom:6px;color:#64748b">🧠 WellnessCard (AI 分析)</div>
+      <div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:8px 10px;color:#64748b">🌤 WeatherCard</div>
+    </div>
+    <div class="card-body">
+      <h3>A — Right after vitals</h3>
+      <p>Sleep sits with health data. WellnessCard can then use real sleep hours from the row above it.</p>
+    </div>
+  </div>
+
+  <!-- Option B -->
+  <div class="card" data-choice="b" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding:16px;background:#f8fafc;font-size:12px;line-height:1.8;color:#475569">
+      <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:12px;padding:8px 10px;margin-bottom:6px;font-weight:600;color:#166534">🔔 StatusHeader — 脉冲 / 心率</div>
+      <div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:8px 10px;margin-bottom:6px;color:#64748b">🧠 WellnessCard (AI 分析)</div>
+      <div style="background:#eef2ff;border:2px solid #818cf8;border-radius:12px;padding:8px 10px;margin-bottom:6px;font-weight:700;color:#3730a3">🌙 睡眠洞察 ← NEW (between health + weather)</div>
+      <div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:8px 10px;color:#64748b">🌤 WeatherCard</div>
+    </div>
+    <div class="card-body">
+      <h3>B — Between wellness &amp; weather</h3>
+      <p>Health cluster: StatusHeader → Wellness → Sleep → Weather. Natural grouping of all bio signals.</p>
+    </div>
+  </div>
+
+  <!-- Option C -->
+  <div class="card" data-choice="c" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding:16px;background:#f8fafc;font-size:12px;line-height:1.8;color:#475569">
+      <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:12px;padding:8px 10px;margin-bottom:6px;font-weight:600;color:#166534">🔔 StatusHeader</div>
+      <div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:8px 10px;margin-bottom:6px;color:#64748b">🧠 WellnessCard</div>
+      <div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:8px 10px;margin-bottom:6px;color:#64748b">🌤 WeatherCard</div>
+      <div style="background:#eef2ff;border:2px solid #818cf8;border-radius:12px;padding:8px 10px;margin-bottom:6px;font-weight:700;color:#3730a3">🌙 睡眠洞察 ← NEW (just before timeline)</div>
+      <div style="background:#f1f5f9;border:1px solid #e2e8f0;border-radius:12px;padding:8px 10px;color:#94a3b8">📋 最近动态 Timeline</div>
+    </div>
+    <div class="card-body">
+      <h3>C — Just before timeline</h3>
+      <p>Sleep acts as a "night bridge" between daytime health and activity history. Thematic separation.</p>
+    </div>
+  </div>
+
+</div>

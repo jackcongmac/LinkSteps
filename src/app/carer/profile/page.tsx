@@ -242,22 +242,26 @@ export default function SeniorProfilePage() {
         )}
 
         {/* 平安扣邀请二维码 */}
-        <section className="rounded-3xl bg-white shadow-sm px-5 py-5">
-          <div className="flex flex-col items-center gap-3">
-            <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center">
-              <QrCode className="w-8 h-8 text-slate-400" />
+        <section className="rounded-3xl bg-white shadow-sm px-5 py-6">
+          <div className="flex flex-col items-center gap-4">
+            <div className="w-20 h-20 rounded-3xl bg-indigo-50 flex items-center justify-center">
+              <QrCode className="w-10 h-10 text-indigo-400" />
             </div>
-            <p className="text-slate-600 text-sm text-center leading-relaxed">
-              生成专属邀请二维码，发送给长辈扫码绑定平安扣设备
-            </p>
+            <div className="text-center space-y-1">
+              <p className="text-slate-700 font-semibold text-base">平安扣邀请二维码</p>
+              <p className="text-slate-400 text-sm leading-relaxed">
+                生成专属二维码，发送给长辈扫码<br />绑定平安扣手环设备
+              </p>
+            </div>
             <button
               type="button"
               disabled
-              className="w-full rounded-2xl bg-slate-100 py-3.5 text-sm font-semibold text-slate-400 cursor-not-allowed"
+              className="w-full rounded-2xl bg-indigo-100 py-4 text-sm font-semibold text-indigo-400 cursor-not-allowed flex items-center justify-center gap-2"
             >
+              <QrCode className="w-4 h-4" />
               生成平安扣邀请二维码
             </button>
-            <p className="text-[11px] text-slate-300">功能即将上线</p>
+            <span className="text-[11px] text-slate-300 bg-slate-50 px-3 py-1 rounded-full">功能即将上线</span>
           </div>
         </section>
 

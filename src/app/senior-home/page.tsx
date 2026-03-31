@@ -202,17 +202,20 @@ export default function SeniorHomePage() {
         ready ? "opacity-100" : "opacity-0",
       ].join(" ")}
     >
-      {/* ── 当前城市天气 ── */}
+      {/* ── 平安扣 · 当前天气 ── */}
       {weather && (
-        <div className="w-full max-w-xs rounded-3xl bg-white border border-slate-100 shadow-sm px-5 py-4 flex items-center justify-between">
-          <p className="text-slate-700 font-semibold text-base">当前城市天气</p>
-          <div className="flex flex-col items-end gap-0.5">
-            <span className="text-slate-700 text-sm font-medium">
-              当前气温: {weather.temp_c}°C
+        <div className="w-full max-w-xs rounded-3xl bg-white border border-slate-100 shadow-sm px-5 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="text-slate-400 text-xs font-medium tracking-wide">平安扣 · 当前天气</span>
+            </div>
+            <span className="text-slate-700 text-sm font-semibold">
+              {weather.temp_c}°C
             </span>
-            <span className="text-slate-400 text-xs">
-              气温 {weather.temp_min}–{weather.temp_max}°C · {weather.text}
-            </span>
+          </div>
+          <div className="mt-1 flex items-center justify-between">
+            <span className="text-slate-400 text-xs">{weather.text}</span>
+            <span className="text-slate-400 text-xs">气温 {weather.temp_min}–{weather.temp_max}°C</span>
           </div>
         </div>
       )}

@@ -40,6 +40,8 @@ function getYesterdayBj(): string {
  */
 function bjLocalToISO(dateStr: string, hh: number, mm: number): string {
   const [y, mo, dd] = dateStr.split("-").map(Number);
+  // hh - 8 may be negative (e.g. 06:15 BJ → hh=6 → -2 UTC).
+  // Date.UTC correctly rolls back the day for negative hours.
   return new Date(Date.UTC(y, mo - 1, dd, hh - 8, mm)).toISOString();
 }
 
@@ -80,7 +82,7 @@ async function seedLastNight(
         light_hours:   3.2,
         rem_hours:     1.5,
       },
-      { onConflict: "senior_id,session_date" },
+      { onConflict: "senior_id,session_date", ignoreDuplicates: true },
     );
 
   if (error) {
@@ -200,6 +202,12 @@ export function startHealthSimulator(
   supabase: SupabaseClient,
   seniorId: string,
 ): () => void {
+  // Reset module-level sleep state so the function is reentrant
+  // (handles hot-reload during development and seniorId changes).
+  sleepStateIdx    = 0;
+  nightSessionLive = false;
+  nightSessionDate = "";
+
   const hour = new Date().getHours();
   let cumulativeSteps = Math.round(4500 * Math.min(hour / 18, 1));
 

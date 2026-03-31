@@ -168,6 +168,7 @@ function StatusHeader({ status, pulse, onPulseEnd, onDismiss }: StatusHeaderProp
     if (!status.audioUrl) return;
 
     // Fetch signed URL then auto-play
+    console.log("[StatusHeader] Requesting signed URL for path:", status.audioUrl);
     setFetchingUrl(true);
     const { data, error } = await supabase.storage
       .from("voice-memos")
@@ -242,7 +243,13 @@ function StatusHeader({ status, pulse, onPulseEnd, onDismiss }: StatusHeaderProp
             )}
           </button>
         ) : (
-          <span className={["w-20 h-20 rounded-full flex items-center justify-center text-4xl", style.dot].join(" ")}>
+          <span
+            className={[
+              "w-20 h-20 rounded-full flex items-center justify-center text-4xl",
+              style.dot,
+              status.kind === 'safe' ? "animate-[breathe_4s_ease-in-out_infinite]" : "",
+            ].join(" ")}
+          >
             {status.icon}
           </span>
         )}
@@ -274,7 +281,24 @@ function StatusHeader({ status, pulse, onPulseEnd, onDismiss }: StatusHeaderProp
           </div>
         </div>
       ) : (
-        <p className="text-sm text-slate-400">{status.subtext}</p>
+        <>
+          <p className="text-sm text-slate-400">{status.subtext}</p>
+
+          {/* ── Health snapshot placeholders (safe / idle) ── */}
+          {(status.kind === 'safe' || status.kind === 'idle') && (
+            <div className="w-full flex items-center justify-center gap-8 pt-1">
+              <div className="flex flex-col items-center gap-0.5">
+                <span className="text-xl font-semibold text-slate-300">--</span>
+                <span className="text-xs text-slate-300">步数</span>
+              </div>
+              <div className="w-px h-7 bg-slate-100" />
+              <div className="flex flex-col items-center gap-0.5">
+                <span className="text-xl font-semibold text-slate-300">--</span>
+                <span className="text-xs text-slate-300">心率</span>
+              </div>
+            </div>
+          )}
+        </>
       )}
 
       {/* Dismiss button */}

@@ -495,7 +495,7 @@ function SleepStateChip({ state }: { state: 'awake' | 'light' | 'deep' | null })
   return (
     <span
       className={["px-4 py-2 rounded-full text-base font-medium", c.cls].join(" ")}
-      style={c.animate ? { animation: 'breathe 4s ease-in-out infinite' } : undefined}
+      style={c.animate ? { animation: 'sleepBreathe 4s ease-in-out infinite' } : undefined}
     >
       {c.label}
     </span>
@@ -503,12 +503,15 @@ function SleepStateChip({ state }: { state: 'awake' | 'light' | 'deep' | null })
 }
 
 function SleepBreakdownBar({ session }: { session: SleepSession }) {
-  const total = session.total_hours ?? 0;
-  if (total === 0) return null;
+  const deep  = session.deep_hours  ?? 0;
+  const light = session.light_hours ?? 0;
+  const rem   = session.rem_hours   ?? 0;
+  const segSum = deep + light + rem;
+  if (segSum === 0) return null;
 
-  const deepPct  = (((session.deep_hours  ?? 0) / total) * 100).toFixed(1);
-  const lightPct = (((session.light_hours ?? 0) / total) * 100).toFixed(1);
-  const remPct   = (((session.rem_hours   ?? 0) / total) * 100).toFixed(1);
+  const deepPct  = ((deep  / segSum) * 100).toFixed(1);
+  const lightPct = ((light / segSum) * 100).toFixed(1);
+  const remPct   = ((rem   / segSum) * 100).toFixed(1);
 
   return (
     <div className="flex flex-col gap-1.5">
@@ -535,7 +538,7 @@ interface SleepInsightsCardProps {
 }
 
 function SleepInsightsCard({ session }: SleepInsightsCardProps) {
-  const isNightWatch     = session !== null && session.ended_at === null;
+  const isNightWatch     = session !== null && session.ended_at === null && session.started_at !== null;
   const isMorningSummary = session !== null && session.ended_at !== null;
 
   const startedAtBj = session?.started_at

@@ -13,7 +13,7 @@
  *   新信号到达 → 脉冲动画 → 无刷新更新时间线顶部
  */
 
-import { useEffect, useState, useCallback, useRef, useMemo } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { createClient } from "@/lib/supabase";
 import type { CheckinRow } from "@/components/senior/carer/CheckinTimeline";
 import type { RealtimePostgresInsertPayload, RealtimePostgresUpdatePayload } from "@supabase/supabase-js";
@@ -252,8 +252,6 @@ export default function CarerDashboard() {
   const [feed,        setFeed]        = useState<FeedItem[]>([]);
   const [dismissedId, setDismissedId] = useState<string | null>(null);
 
-  // Stable ref so realtime handler closure always has fresh seniorId
-  const seniorIdRef = useRef<string | null>(null);
 
   // ── 1. Load senior + checkins ────────────────────────────────
   const loadData = useCallback(async () => {
@@ -273,7 +271,6 @@ export default function CarerDashboard() {
 
     const id = (profiles?.[0] as { id: string } | undefined)?.id ?? null;
     setSeniorId(id);
-    seniorIdRef.current = id;
 
     if (id) {
       const { data: rows, error: checkinsError } = await supabase
@@ -317,26 +314,24 @@ export default function CarerDashboard() {
   }, [checkins, messages]);
 
   // ── 2. Realtime subscription ─────────────────────────────────
-  // Set up FIRST so we never miss an event during data load
+  // Waits for seniorId so we can use server-side filters.
+  // Server-side filter (filter: `senior_id=eq.${seniorId}`) is more
+  // reliable than client-side filtering — Supabase routes only matching
+  // rows to this subscriber rather than relying on RLS subquery evaluation.
   useEffect(() => {
+    if (!seniorId) return;
+
     const channel = supabase
       .channel("carer-dashboard")
       .on(
         "postgres_changes",
-        { event: "INSERT", schema: "public", table: "checkins" },
+        { event: "INSERT", schema: "public", table: "checkins", filter: `senior_id=eq.${seniorId}` },
         (payload: RealtimePostgresInsertPayload<CheckinRow>) => {
-          const incoming = payload.new;
-          if (
-            seniorIdRef.current &&
-            (incoming as CheckinRow & { senior_id?: string }).senior_id !== seniorIdRef.current
-          ) return;
-
           setCheckins((prev) => [
-            { ...incoming, isNew: true },
+            { ...payload.new, isNew: true },
             ...prev.slice(0, 19),
           ]);
           setPulse(true);
-
           setTimeout(() => {
             setCheckins((prev) =>
               prev.map((c, i) => (i === 0 ? { ...c, isNew: false } : c)),
@@ -346,19 +341,16 @@ export default function CarerDashboard() {
       )
       .on(
         "postgres_changes",
-        { event: "INSERT", schema: "public", table: "messages" },
+        { event: "INSERT", schema: "public", table: "messages", filter: `senior_id=eq.${seniorId}` },
         (payload: RealtimePostgresInsertPayload<MessageRow>) => {
-          const incoming = payload.new;
-          if (incoming.senior_id !== seniorIdRef.current) return;
-          setMessages((prev) => [incoming, ...prev.slice(0, 39)]);
+          setMessages((prev) => [payload.new, ...prev.slice(0, 39)]);
         },
       )
       .on(
         "postgres_changes",
-        { event: "UPDATE", schema: "public", table: "messages" },
+        { event: "UPDATE", schema: "public", table: "messages", filter: `senior_id=eq.${seniorId}` },
         (payload: RealtimePostgresUpdatePayload<MessageRow>) => {
           const updated = payload.new;
-          if (updated.senior_id !== seniorIdRef.current) return;
           setMessages((prev) =>
             prev.map((m) => (m.id === updated.id ? { ...m, ...updated } : m)),
           );
@@ -367,7 +359,7 @@ export default function CarerDashboard() {
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
-  }, [supabase]);
+  }, [supabase, seniorId]);
 
   // ── 3. Weather (Shanghai) ─────────────────────────────────────
   useEffect(() => {

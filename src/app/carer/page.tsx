@@ -19,6 +19,8 @@ import { createClient } from "@/lib/supabase";
 import type { CheckinRow } from "@/components/senior/carer/CheckinTimeline";
 import type { RealtimePostgresInsertPayload, RealtimePostgresUpdatePayload } from "@supabase/supabase-js";
 import type { WeatherPayload } from "@/app/api/weather/route";
+import { calculateSeniorWellness } from "@/lib/wellness-score";
+import type { WellnessResult } from "@/lib/wellness-score";
 import ComposeMessage from "@/components/senior/carer/ComposeMessage";
 import FamilyTimeline from "@/components/senior/carer/FamilyTimeline";
 import type { MessageRow } from "@/types/messages";
@@ -43,6 +45,7 @@ function relativeTime(iso: string): string {
   return "超过 24 小时前";
 }
 
+/** Jack's greeting based on his local time */
 function getGreeting(): string {
   const h = new Date().getHours();
   if (h < 11) return "早上好";
@@ -51,17 +54,83 @@ function getGreeting(): string {
   return "晚上好";
 }
 
-/** Rule-based one-line weather insight in Chinese */
+/** Beijing (Asia/Shanghai) time string + period label */
+function getBjClock(): { time: string; period: string } {
+  const bj = new Date().toLocaleString("en-US", { timeZone: "Asia/Shanghai" });
+  const d   = new Date(bj);
+  const hh  = String(d.getHours()).padStart(2, "0");
+  const mm  = String(d.getMinutes()).padStart(2, "0");
+  const h   = d.getHours();
+  let period = "深夜";
+  if (h >=  5 && h <  9) period = "早晨";
+  else if (h >=  9 && h < 12) period = "上午";
+  else if (h >= 12 && h < 14) period = "中午";
+  else if (h >= 14 && h < 18) period = "下午";
+  else if (h >= 18 && h < 21) period = "傍晚";
+  else if (h >= 21)            period = "晚上";
+  return { time: `${hh}:${mm}`, period };
+}
+
+/** Jack's local time string */
+function getLocalClock(): string {
+  const d  = new Date();
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  return `${hh}:${mm}`;
+}
+
+/** QWeather icon_code → emoji */
+function weatherIcon(code: string): string {
+  const n = parseInt(code, 10);
+  if (n === 100)                   return "☀️";
+  if (n >= 101 && n <= 103)        return "⛅";
+  if (n === 104)                   return "☁️";
+  if (n >= 200 && n <= 213)        return "💨";
+  if (n >= 300 && n <= 313)        return "🌧️";
+  if (n >= 314 && n <= 399)        return "🌩️";
+  if (n >= 400 && n <= 499)        return "❄️";
+  if (n >= 500 && n <= 599)        return "🌫️";
+  return "🌤️";
+}
+
+/** Rule-based one-line weather insight referencing Beijing */
 function generateInsight(w: WeatherPayload): string {
   if (w.pressure < 1005)
-    return `上海气压突降（${w.pressure} hPa），可能引起关节不适，建议提醒妈妈注意保暖休息。`;
+    return `北京气压突降（${w.pressure} hPa），可能引起关节不适，建议提醒妈妈注意保暖休息。`;
   if (w.pressure < 1010)
-    return `上海气压偏低，适合轻度活动。天气${w.text}，${w.temp_c}°C，出门记得加件外套。`;
+    return `北京气压偏低，适合轻度室内活动。天气${w.text}，${w.temp_c}°C，出门记得加件外套。`;
   if (w.temp_c >= 28)
-    return `上海气温较高（${w.temp_c}°C），提醒妈妈多补水、避免午后高温时段外出。`;
+    return `北京气温较高（${w.temp_c}°C），提醒妈妈多补水、避免午后高温时段外出。`;
   if (w.temp_c <= 10)
-    return `上海天气偏凉（${w.temp_c}°C），提醒妈妈出门前多加衣物、注意保暖。`;
-  return `上海今日${w.text}，气温 ${w.temp_c}°C，气压平稳（${w.pressure} hPa），天气条件良好，适合外出散步。`;
+    return `北京天气偏凉（${w.temp_c}°C），提醒妈妈出门前多加衣物、注意保暖。`;
+  return `北京今日${w.text}，气温 ${w.temp_c}°C，气压平稳（${w.pressure} hPa），天气条件良好，适合外出散步。`;
+}
+
+// ── Health types ──────────────────────────────────────────────
+
+interface HealthRow {
+  id:          string;
+  senior_id:   string;
+  metric_type: string;   // 'heart_rate' | 'steps'
+  value:       number;
+  recorded_at: string;
+}
+
+interface HealthData {
+  heartRate: number;
+  steps:     number;
+}
+
+interface SleepSession {
+  id:            string;
+  session_date:  string;
+  started_at:    string | null;
+  ended_at:      string | null;
+  current_state: 'awake' | 'light' | 'deep' | null;
+  total_hours:   number | null;
+  deep_hours:    number | null;
+  light_hours:   number | null;
+  rem_hours:     number | null;
 }
 
 // ── Status derivation ─────────────────────────────────────────
@@ -122,11 +191,20 @@ interface StatusHeaderProps {
   pulse:      boolean;
   onPulseEnd: () => void;
   onDismiss:  () => void;
+  healthData: HealthData | null;
 }
 
-function StatusHeader({ status, pulse, onPulseEnd, onDismiss }: StatusHeaderProps) {
-  const style   = STATUS_STYLE[status.kind];
-  const isVoice = status.kind === 'voice';
+function StatusHeader({ status, pulse, onPulseEnd, onDismiss, healthData }: StatusHeaderProps) {
+  const isAnomaly = (healthData?.heartRate ?? 0) > 120;
+  const style     = isAnomaly
+    ? { bg: 'bg-red-50 border-red-200', text: 'text-red-700', dot: 'bg-red-100', ring: 'border-red-400', spin: 'border-t-red-600' }
+    : STATUS_STYLE[status.kind];
+  const isVoice   = status.kind === 'voice' && !isAnomaly;
+
+  // Breathing speed synced to BPM: 72 bpm → ~2.5 s, 120 bpm → 1.5 s
+  const breatheDuration = healthData
+    ? `${Math.max(1.5, (60 / healthData.heartRate) * 3).toFixed(1)}s`
+    : '4s';
 
   // ── Voice player state ────────────────────────────────────
   const [signedUrl,   setSignedUrl]   = useState<string | null>(null);
@@ -274,20 +352,26 @@ function StatusHeader({ status, pulse, onPulseEnd, onDismiss }: StatusHeaderProp
             className={[
               "w-20 h-20 rounded-full flex items-center justify-center text-4xl",
               style.dot,
-              status.kind === 'safe' ? "animate-[breathe_4s_ease-in-out_infinite]" : "",
+              (status.kind === 'safe' || isAnomaly)
+                ? "animate-[breathe_4s_ease-in-out_infinite]"
+                : "",
             ].join(" ")}
+            style={{ animationDuration: breatheDuration }}
           >
-            {status.icon}
+            {isAnomaly ? "❤️" : status.icon}
           </span>
         )}
-        {status.kind === 'safe' && (
+        {(status.kind === 'safe' && !isAnomaly) && (
           <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-emerald-500 ring-2 ring-white animate-pulse" />
+        )}
+        {isAnomaly && (
+          <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-red-500 ring-2 ring-white animate-ping" />
         )}
       </div>
 
       {/* Label */}
       <p className={["text-2xl font-bold tracking-tight", style.text].join(" ")}>
-        {status.label}
+        {isAnomaly ? "心率异常！" : status.label}
       </p>
 
       {/* Voice: elapsed / total timestamps */}
@@ -298,20 +382,26 @@ function StatusHeader({ status, pulse, onPulseEnd, onDismiss }: StatusHeaderProp
         </div>
       ) : (
         <>
-          <p className="text-sm text-slate-400">{status.subtext}</p>
+          <p className={["text-sm", isAnomaly ? "text-red-400" : "text-slate-400"].join(" ")}>
+            {isAnomaly
+              ? `当前心率 ${healthData!.heartRate} 次/分，请立即确认`
+              : status.subtext}
+          </p>
 
-          {/* ── Health snapshot (safe / idle) ── */}
-          {(status.kind === 'safe' || status.kind === 'idle') && (
+          {/* ── Health snapshot (safe / idle / anomaly) ── */}
+          {(status.kind === 'safe' || status.kind === 'idle' || isAnomaly) && (
             <div className="w-full flex items-center justify-center gap-6 pt-2 pb-0.5">
               {/* Steps */}
               <div className="flex flex-col items-center gap-0.5">
                 <div className="flex items-baseline gap-0.5">
-                  <span className="text-2xl font-bold text-emerald-500">3,248</span>
-                  <span className="text-xs font-medium text-emerald-400 mb-0.5">步</span>
+                  <span className={["text-2xl font-bold", isAnomaly ? "text-red-400" : "text-emerald-500"].join(" ")}>
+                    {healthData ? healthData.steps.toLocaleString() : "--"}
+                  </span>
+                  <span className={["text-xs font-medium mb-0.5", isAnomaly ? "text-red-300" : "text-emerald-400"].join(" ")}>步</span>
                 </div>
                 <div className="flex items-center gap-1">
                   <span className="text-xs text-slate-400">步数</span>
-                  <span className="text-[10px] text-emerald-400 font-medium">↑ 今日</span>
+                  <span className={["text-[10px] font-medium", isAnomaly ? "text-red-400" : "text-emerald-400"].join(" ")}>↑ 今日</span>
                 </div>
               </div>
 
@@ -320,21 +410,35 @@ function StatusHeader({ status, pulse, onPulseEnd, onDismiss }: StatusHeaderProp
               {/* Heart rate */}
               <div className="flex flex-col items-center gap-0.5">
                 <div className="flex items-baseline gap-0.5">
-                  <span className="text-2xl font-bold text-emerald-500">72</span>
-                  <span className="text-xs font-medium text-emerald-400 mb-0.5">次/分</span>
+                  <span className={["text-2xl font-bold", isAnomaly ? "text-red-500" : "text-emerald-500"].join(" ")}>
+                    {healthData ? healthData.heartRate : "--"}
+                  </span>
+                  <span className={["text-xs font-medium mb-0.5", isAnomaly ? "text-red-400" : "text-emerald-400"].join(" ")}>次/分</span>
                 </div>
                 <div className="flex items-center gap-1">
                   <span className="text-xs text-slate-400">心率</span>
-                  <span className="text-[10px] text-emerald-400 font-medium">● 正常</span>
+                  <span className={["text-[10px] font-medium", isAnomaly ? "text-red-500 animate-pulse" : "text-emerald-400"].join(" ")}>
+                    {isAnomaly ? "⚠ 偏高" : "● 正常"}
+                  </span>
                 </div>
               </div>
             </div>
           )}
+
+          {/* Anomaly: Call Mom button */}
+          {isAnomaly && (
+            <a
+              href="tel:"
+              className="mt-1 flex items-center gap-2 px-6 py-3 rounded-full bg-red-500 text-white text-base font-semibold active:scale-95 transition-transform shadow-md shadow-red-200"
+            >
+              📞 立即拨打妈妈
+            </a>
+          )}
         </>
       )}
 
-      {/* Dismiss button */}
-      {status.dismissible && (
+      {/* Dismiss button (non-anomaly) */}
+      {status.dismissible && !isAnomaly && (
         <button
           onClick={onDismiss}
           className={[
@@ -361,6 +465,82 @@ function StatusHeader({ status, pulse, onPulseEnd, onDismiss }: StatusHeaderProp
   );
 }
 
+// ── WellnessCard ──────────────────────────────────────────────
+
+const LEVEL_STYLE = {
+  great:    { ring: 'text-emerald-500', badge: 'bg-emerald-50 text-emerald-600', label: '状态良好' },
+  good:     { ring: 'text-sky-500',     badge: 'bg-sky-50 text-sky-600',         label: '整体平稳' },
+  alert:    { ring: 'text-amber-500',   badge: 'bg-amber-50 text-amber-600',     label: '需要关注' },
+  critical: { ring: 'text-red-500',     badge: 'bg-red-50 text-red-600',         label: '立即关注' },
+};
+
+interface WellnessCardProps {
+  wellness: WellnessResult | null;
+  loading:  boolean;
+}
+
+function WellnessCard({ wellness, loading }: WellnessCardProps) {
+  const ls = wellness ? LEVEL_STYLE[wellness.level] : LEVEL_STYLE.good;
+
+  return (
+    <div
+      className="rounded-3xl bg-white border border-indigo-100 shadow-sm px-5 py-5 flex flex-col gap-4"
+      style={{ animation: 'wisdomPulse 4s ease-in-out infinite' }}
+    >
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="text-xl">🧠</span>
+          <p className="text-slate-700 font-semibold text-base">AI 每日健康分析</p>
+        </div>
+        {wellness && (
+          <span className={["text-[11px] font-medium px-2.5 py-1 rounded-full", ls.badge].join(" ")}>
+            {ls.label}
+          </span>
+        )}
+      </div>
+
+      {loading || !wellness ? (
+        <div className="flex items-center gap-3">
+          <div className="w-5 h-5 rounded-full border-2 border-indigo-200 border-t-indigo-500 animate-spin" />
+          <p className="text-slate-400 text-sm">正在分析健康数据…</p>
+        </div>
+      ) : (
+        <div className="flex items-center gap-4">
+          {/* Score ring */}
+          <div className="relative shrink-0 w-16 h-16">
+            <svg viewBox="0 0 36 36" className="w-full h-full -rotate-90">
+              <circle cx="18" cy="18" r="15.5" fill="none" stroke="#f1f5f9" strokeWidth="3" />
+              <circle
+                cx="18" cy="18" r="15.5"
+                fill="none"
+                strokeWidth="3"
+                strokeLinecap="round"
+                className={ls.ring}
+                stroke="currentColor"
+                strokeDasharray={`${wellness.score} 100`}
+                style={{ transition: 'stroke-dasharray 1s ease' }}
+              />
+            </svg>
+            <span className={["absolute inset-0 flex items-center justify-center text-base font-bold", ls.ring].join(" ")}>
+              {wellness.score}
+            </span>
+          </div>
+
+          {/* Advice */}
+          <p className="text-slate-600 text-sm leading-relaxed flex-1">
+            {wellness.advice}
+          </p>
+        </div>
+      )}
+
+      <p className="text-[10px] text-slate-300 text-right -mt-1">
+        基于北京气压 · 心率 · 步数 · 睡眠
+      </p>
+    </div>
+  );
+}
+
 // ── WeatherCard ───────────────────────────────────────────────
 
 interface WeatherCardProps {
@@ -374,8 +554,8 @@ function WeatherCard({ weather, loading }: WeatherCardProps) {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <span className="text-xl">🌤</span>
-          <p className="text-slate-700 font-semibold text-base">上海实时天气</p>
+          <span className="text-xl">{weather ? weatherIcon(weather.icon_code) : "🌤️"}</span>
+          <p className="text-slate-700 font-semibold text-base">妈妈所在城市天气</p>
         </div>
         {weather && (
           <span className="text-sm text-slate-400">
@@ -434,6 +614,11 @@ export default function CarerDashboard() {
   const [messages,    setMessages]    = useState<MessageRow[]>([]);
   const [feed,        setFeed]        = useState<FeedItem[]>([]);
   const [dismissedId, setDismissedId] = useState<string | null>(null);
+  const [healthData,   setHealthData]   = useState<HealthData | null>(null);
+  const [sleepSession, setSleepSession] = useState<SleepSession | null>(null);
+  const [bjWeather,    setBjWeather]    = useState<WeatherPayload | null>(null);
+  const [bjWeatherLoad,setBjWeatherLoad]= useState(true);
+  const [, setClockTick] = useState(0);   // triggers re-render for live clocks
 
 
   // ── 1. Load senior + checkins ────────────────────────────────
@@ -481,6 +666,48 @@ export default function CarerDashboard() {
       }
 
       setMessages((msgRows as MessageRow[]) ?? []);
+
+      // Latest heart_rate + steps rows (vertical schema: metric_type / value)
+      const { data: healthRows } = await supabase
+        .from("health_metrics")
+        .select("metric_type, value")
+        .eq("senior_id", id)
+        .in("metric_type", ["heart_rate", "steps"])
+        .limit(10);   // no ORDER BY — avoids column-name assumption
+
+      if (healthRows) {
+        const hrRow    = (healthRows as { metric_type: string; value: number }[])
+          .find((r) => r.metric_type === "heart_rate");
+        const stepsRow = (healthRows as { metric_type: string; value: number }[])
+          .find((r) => r.metric_type === "steps");
+        if (hrRow || stepsRow) {
+          setHealthData({
+            heartRate: hrRow?.value    ?? 75,
+            steps:     stepsRow?.value ?? 0,
+          });
+        }
+      }
+
+      // Fetch latest sleep session (today or yesterday BJ time — within 2 days to avoid stale data)
+      const bjToday = new Date().toLocaleString("en-US", { timeZone: "Asia/Shanghai" });
+      const bjDate  = new Date(bjToday);
+      bjDate.setDate(bjDate.getDate() - 1);
+      const cutoff  = `${bjDate.getFullYear()}-${String(bjDate.getMonth() + 1).padStart(2, "0")}-${String(bjDate.getDate()).padStart(2, "0")}`;
+
+      const { data: sleepRows, error: sleepError } = await supabase
+        .from("sleep_sessions")
+        .select("id, session_date, started_at, ended_at, current_state, total_hours, deep_hours, light_hours, rem_hours")
+        .eq("senior_id", id)
+        .gte("session_date", cutoff)
+        .order("session_date", { ascending: false })
+        .limit(1);
+
+      if (sleepError) {
+        console.error("[carer] sleep_sessions query failed:", sleepError.message);
+      }
+      if (sleepRows && sleepRows.length > 0) {
+        setSleepSession(sleepRows[0] as SleepSession);
+      }
     } else {
       console.warn('[carer] no senior_profile found for user', user.id,
         '— run the seed SQL in Supabase Dashboard to create one.');
@@ -543,6 +770,41 @@ export default function CarerDashboard() {
           );
         },
       )
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "health_metrics" },
+        (payload: RealtimePostgresInsertPayload<HealthRow>) => {
+          const row = payload.new;
+          if (row.senior_id !== seniorId) return;
+          console.log(`[health-realtime] ${row.metric_type}=${row.value}`);
+          // Merge whichever metric_type just arrived; keep the other value intact
+          setHealthData((prev) => {
+            const base = prev ?? { heartRate: 75, steps: 0 };
+            if (row.metric_type === "heart_rate") return { ...base, heartRate: row.value };
+            if (row.metric_type === "steps")      return { ...base, steps:     row.value };
+            return base;
+          });
+        },
+      )
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "sleep_sessions" },
+        (payload: RealtimePostgresUpdatePayload<SleepSession & { senior_id: string }>) => {
+          const updated = payload.new;
+          if (updated.senior_id !== seniorId) return;
+          setSleepSession(updated);
+          console.log(`[sleep-realtime] state=${updated.current_state ?? "ended"}`);
+        },
+      )
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "sleep_sessions" },
+        (payload: RealtimePostgresInsertPayload<SleepSession & { senior_id: string }>) => {
+          const row = payload.new;
+          if (row.senior_id !== seniorId) return;
+          setSleepSession(row);
+        },
+      )
       .subscribe((status) => {
         console.log("[carer-realtime] channel status:", status);
       });
@@ -550,16 +812,27 @@ export default function CarerDashboard() {
     return () => { supabase.removeChannel(channel); };
   }, [supabase, seniorId]);
 
-  // ── 3. Weather (Shanghai) ─────────────────────────────────────
+  // ── 3. Weather (Shanghai carer + Beijing senior) ──────────────
   useEffect(() => {
     fetch("/api/weather?city=shanghai")
       .then((r) => r.json())
-      .then((d: WeatherPayload) => {
-        if (!d.pressure) return;
-        setWeather(d);
-      })
+      .then((d: WeatherPayload) => { if (d.pressure) setWeather(d); })
       .catch(() => null)
       .finally(() => setWeatherLoad(false));
+  }, []);
+
+  // Clock tick — keeps Beijing + local time displays current
+  useEffect(() => {
+    const id = setInterval(() => setClockTick((n) => n + 1), 30_000);
+    return () => clearInterval(id);
+  }, []);
+
+  useEffect(() => {
+    fetch("/api/weather?city=beijing")
+      .then((r) => r.json())
+      .then((d: WeatherPayload) => { if (d.pressure) setBjWeather(d); })
+      .catch(() => null)
+      .finally(() => setBjWeatherLoad(false));
   }, []);
 
   // ── Loading ──────────────────────────────────────────────────
@@ -574,6 +847,15 @@ export default function CarerDashboard() {
 
   const status = deriveStatus(feed, dismissedId);
 
+  // Wellness score — recomputes whenever health or weather updates
+  // Sleep data: placeholder 6.5h until a sleep API is wired in
+  const wellness: WellnessResult | null = (healthData || bjWeather) ? calculateSeniorWellness({
+    pressure:  bjWeather?.pressure,
+    steps:     healthData?.steps,
+    heartRate: healthData?.heartRate,
+    sleep:     sleepSession?.total_hours ?? 6.5,
+  }) : null;
+
   // ── Main ─────────────────────────────────────────────────────
 
   return (
@@ -587,11 +869,22 @@ export default function CarerDashboard() {
       <div className="max-w-md mx-auto px-4 pt-12 pb-10 flex flex-col gap-5">
 
         {/* ── Page header ── */}
-        <div className="px-1">
-          <p className="text-slate-400 text-sm">{getGreeting()}</p>
-          <h1 className="text-slate-800 text-2xl font-semibold mt-0.5">
-            上海指挥中心
-          </h1>
+        <div className="px-1 flex items-start justify-between">
+          <div>
+            <p className="text-slate-400 text-sm">{getGreeting()}</p>
+            <h1 className="text-slate-800 text-2xl font-semibold mt-0.5">
+              妈妈的平安看板
+            </h1>
+          </div>
+          {/* Beijing time — always visible, primary clock */}
+          <div className="flex flex-col items-end mt-0.5">
+            <span className="text-slate-700 text-lg font-semibold leading-tight tabular-nums">
+              {getBjClock().time}
+            </span>
+            <span className="text-xs text-slate-400 mt-0.5">
+              北京 · {getBjClock().period}
+            </span>
+          </div>
         </div>
 
         {/* ── Status header ── */}
@@ -600,10 +893,14 @@ export default function CarerDashboard() {
           pulse={pulse}
           onPulseEnd={() => setPulse(false)}
           onDismiss={() => setDismissedId(status.itemId)}
+          healthData={healthData}
         />
 
-        {/* ── Weather + AI insight ── */}
-        <WeatherCard weather={weather} loading={weatherLoad} />
+        {/* ── AI wellness analysis ── */}
+        <WellnessCard wellness={wellness} loading={bjWeatherLoad && !healthData} />
+
+        {/* ── Beijing weather (Mom's city) ── */}
+        <WeatherCard weather={bjWeather} loading={bjWeatherLoad} />
 
         {/* ── Timeline ── */}
         <div className="bg-white rounded-3xl border border-slate-100 shadow-sm px-5 py-5">
@@ -620,6 +917,11 @@ export default function CarerDashboard() {
             <FamilyTimeline items={feed} />
           </div>
         </div>
+
+        {/* ── Footer — Jack's local time, discreet ── */}
+        <p className="text-center text-[11px] text-slate-300 pb-2 tabular-nums">
+          你的本地时间 {getLocalClock()}
+        </p>
 
       </div>
     </main>

@@ -314,10 +314,9 @@ export default function CarerDashboard() {
   }, [checkins, messages]);
 
   // ── 2. Realtime subscription ─────────────────────────────────
-  // Waits for seniorId so we can use server-side filters.
-  // Server-side filter (filter: `senior_id=eq.${seniorId}`) is more
-  // reliable than client-side filtering — Supabase routes only matching
-  // rows to this subscriber rather than relying on RLS subquery evaluation.
+  // No server-side filter — subscribe to ALL inserts, then match
+  // senior_id client-side.  This avoids any UUID filter-syntax issues
+  // with Supabase Realtime and ensures every event reaches the callback.
   useEffect(() => {
     if (!seniorId) return;
 
@@ -325,10 +324,12 @@ export default function CarerDashboard() {
       .channel("carer-dashboard")
       .on(
         "postgres_changes",
-        { event: "INSERT", schema: "public", table: "checkins", filter: `senior_id=eq.${seniorId}` },
+        { event: "INSERT", schema: "public", table: "checkins" },
         (payload: RealtimePostgresInsertPayload<CheckinRow>) => {
+          const row = payload.new as CheckinRow & { senior_id: string };
+          if (row.senior_id !== seniorId) return;
           setCheckins((prev) => [
-            { ...payload.new, isNew: true },
+            { ...row, isNew: true },
             ...prev.slice(0, 19),
           ]);
           setPulse(true);
@@ -341,22 +342,27 @@ export default function CarerDashboard() {
       )
       .on(
         "postgres_changes",
-        { event: "INSERT", schema: "public", table: "messages", filter: `senior_id=eq.${seniorId}` },
+        { event: "INSERT", schema: "public", table: "messages" },
         (payload: RealtimePostgresInsertPayload<MessageRow>) => {
-          setMessages((prev) => [payload.new, ...prev.slice(0, 39)]);
+          const row = payload.new;
+          if (row.senior_id !== seniorId) return;
+          setMessages((prev) => [row, ...prev.slice(0, 39)]);
         },
       )
       .on(
         "postgres_changes",
-        { event: "UPDATE", schema: "public", table: "messages", filter: `senior_id=eq.${seniorId}` },
+        { event: "UPDATE", schema: "public", table: "messages" },
         (payload: RealtimePostgresUpdatePayload<MessageRow>) => {
           const updated = payload.new;
+          if (updated.senior_id !== seniorId) return;
           setMessages((prev) =>
             prev.map((m) => (m.id === updated.id ? { ...m, ...updated } : m)),
           );
         },
       )
-      .subscribe();
+      .subscribe((status) => {
+        console.log("[carer-realtime] channel status:", status);
+      });
 
     return () => { supabase.removeChannel(channel); };
   }, [supabase, seniorId]);

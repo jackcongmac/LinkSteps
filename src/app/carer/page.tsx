@@ -13,7 +13,8 @@
  *   新信号到达 → 脉冲动画 → 无刷新更新时间线顶部
  */
 
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
+import { Play, Pause } from "lucide-react";
 import { createClient } from "@/lib/supabase";
 import type { CheckinRow } from "@/components/senior/carer/CheckinTimeline";
 import type { RealtimePostgresInsertPayload, RealtimePostgresUpdatePayload } from "@supabase/supabase-js";
@@ -74,43 +75,42 @@ interface StatusInfo {
   subtext:     string;
   itemId:      string | null;
   dismissible: boolean;
+  audioUrl?:   string;   // only set when kind === 'voice'
 }
 
-const STATUS_STYLE: Record<StatusKind, { bg: string; text: string; dot: string; ring: string }> = {
-  safe:   { bg: 'bg-emerald-50 border-emerald-100', text: 'text-emerald-700', dot: 'bg-emerald-100', ring: 'border-emerald-400' },
-  idle:   { bg: 'bg-amber-50 border-amber-100',     text: 'text-amber-700',   dot: 'bg-amber-100',   ring: 'border-amber-400'   },
-  wechat: { bg: 'bg-emerald-50 border-emerald-200', text: 'text-emerald-700', dot: 'bg-emerald-100', ring: 'border-emerald-400' },
-  call:   { bg: 'bg-amber-50 border-amber-200',     text: 'text-amber-700',   dot: 'bg-amber-100',   ring: 'border-amber-400'   },
-  voice:  { bg: 'bg-purple-50 border-purple-100',   text: 'text-purple-700',  dot: 'bg-purple-100',  ring: 'border-purple-400'  },
+const STATUS_STYLE: Record<StatusKind, { bg: string; text: string; dot: string; ring: string; spin: string }> = {
+  safe:   { bg: 'bg-emerald-50 border-emerald-100', text: 'text-emerald-700', dot: 'bg-emerald-100', ring: 'border-emerald-400', spin: 'border-t-emerald-600' },
+  idle:   { bg: 'bg-amber-50 border-amber-100',     text: 'text-amber-700',   dot: 'bg-amber-100',   ring: 'border-amber-400',   spin: 'border-t-amber-600'   },
+  wechat: { bg: 'bg-emerald-50 border-emerald-200', text: 'text-emerald-700', dot: 'bg-emerald-100', ring: 'border-emerald-400', spin: 'border-t-emerald-600' },
+  call:   { bg: 'bg-amber-50 border-amber-200',     text: 'text-amber-700',   dot: 'bg-amber-100',   ring: 'border-amber-400',   spin: 'border-t-amber-600'   },
+  voice:  { bg: 'bg-purple-50 border-purple-100',   text: 'text-purple-700',  dot: 'bg-purple-100',  ring: 'border-purple-400',  spin: 'border-t-purple-600'  },
 };
 
 const ACTION_KINDS = new Set(['checkin', 'wechat_request', 'call_request', 'voice']);
 
+function formatSeconds(s: number): string {
+  const m   = Math.floor(s / 60);
+  const sec = Math.floor(s % 60);
+  return `${m}:${sec.toString().padStart(2, "0")}`;
+}
+
 function deriveStatus(feed: FeedItem[], dismissedId: string | null): StatusInfo {
-  const latest     = feed.find((item) => ACTION_KINDS.has(item.kind)) ?? null;
+  const latest      = feed.find((item) => ACTION_KINDS.has(item.kind)) ?? null;
   const lastCheckin = feed.find((i) => i.kind === 'checkin') ?? null;
-  const baseGood   = lastCheckin !== null && isWithin24h(lastCheckin.created_at);
+  const baseGood    = lastCheckin !== null && isWithin24h(lastCheckin.created_at);
   const baseSubtext = lastCheckin
     ? `最后平安信号：${relativeTime(lastCheckin.created_at)}`
     : '还没有收到平安信号';
 
-  // Baseline: no action, dismissed, or the latest is just a checkin
   if (!latest || latest.id === dismissedId || latest.kind === 'checkin') {
-    return {
-      kind:        baseGood ? 'safe' : 'idle',
-      label:       baseGood ? '一切安好' : '建议问候',
-      icon:        baseGood ? '❤️' : '🔔',
-      subtext:     baseSubtext,
-      itemId:      latest?.id ?? null,
-      dismissible: false,
-    };
+    return { kind: baseGood ? 'safe' : 'idle', label: baseGood ? '一切安好' : '建议问候', icon: baseGood ? '❤️' : '🔔', subtext: baseSubtext, itemId: latest?.id ?? null, dismissible: false };
   }
 
   const ago = relativeTime(latest.created_at);
 
   if (latest.kind === 'wechat_request') return { kind: 'wechat', label: '请求回复微信',   icon: '💬', subtext: `${ago}发来请求`, itemId: latest.id, dismissible: true };
   if (latest.kind === 'call_request')   return { kind: 'call',   label: '请求回个电话',   icon: '📞', subtext: `${ago}发来请求`, itemId: latest.id, dismissible: true };
-  if (latest.kind === 'voice')          return { kind: 'voice',  label: '收到新语音留言', icon: '🎙️', subtext: `${ago}发来语音`, itemId: latest.id, dismissible: true };
+  if (latest.kind === 'voice')          return { kind: 'voice',  label: '收到新语音留言', icon: '🎙️', subtext: `${ago}发来语音`, itemId: latest.id, dismissible: true, audioUrl: latest.audio_url };
 
   return { kind: baseGood ? 'safe' : 'idle', label: baseGood ? '一切安好' : '建议问候', icon: baseGood ? '❤️' : '🔔', subtext: baseSubtext, itemId: null, dismissible: false };
 }
@@ -125,7 +125,85 @@ interface StatusHeaderProps {
 }
 
 function StatusHeader({ status, pulse, onPulseEnd, onDismiss }: StatusHeaderProps) {
-  const style = STATUS_STYLE[status.kind];
+  const style   = STATUS_STYLE[status.kind];
+  const isVoice = status.kind === 'voice';
+
+  // ── Voice player state ────────────────────────────────────
+  const [signedUrl,   setSignedUrl]   = useState<string | null>(null);
+  const [playing,     setPlaying]     = useState(false);
+  const [progress,    setProgress]    = useState(0);    // 0–1
+  const [duration,    setDuration]    = useState(0);    // seconds
+  const [fetchingUrl, setFetchingUrl] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const supabase = useMemo(() => createClient(), []);
+
+  // Reset audio state whenever the active item changes (new voice or dismiss)
+  useEffect(() => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.src = "";
+    }
+    setSignedUrl(null);
+    setPlaying(false);
+    setProgress(0);
+    setDuration(0);
+    setFetchingUrl(false);
+  }, [status.itemId]);
+
+  const handlePlayPause = useCallback(async () => {
+    if (fetchingUrl) return;
+
+    // Toggle play/pause if URL is already fetched
+    if (signedUrl && audioRef.current) {
+      if (playing) {
+        audioRef.current.pause();
+        setPlaying(false);
+      } else {
+        audioRef.current.play().catch(() => null);
+        setPlaying(true);
+      }
+      return;
+    }
+
+    if (!status.audioUrl) return;
+
+    // Fetch signed URL then auto-play
+    setFetchingUrl(true);
+    const { data, error } = await supabase.storage
+      .from("voice-memos")
+      .createSignedUrl(status.audioUrl, 300);
+    setFetchingUrl(false);
+
+    if (error || !data?.signedUrl) {
+      console.error("[StatusHeader] signed URL error:", error?.message, "path:", status.audioUrl);
+      return;
+    }
+    setSignedUrl(data.signedUrl);
+  }, [status.audioUrl, signedUrl, playing, fetchingUrl, supabase]);
+
+  // Auto-play once signed URL is ready
+  useEffect(() => {
+    if (signedUrl && audioRef.current) {
+      audioRef.current.play().then(() => setPlaying(true)).catch(() => null);
+    }
+  }, [signedUrl]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleTimeUpdate = useCallback(() => {
+    if (!audioRef.current) return;
+    const { currentTime, duration: d } = audioRef.current;
+    if (d > 0) setProgress(currentTime / d);
+  }, []);
+
+  const handleLoadedMetadata = useCallback(() => {
+    if (audioRef.current?.duration) setDuration(audioRef.current.duration);
+  }, []);
+
+  const handleEnded = useCallback(() => {
+    setPlaying(false);
+    setProgress(1);
+    // Auto-reset to 一切安好 after a brief pause
+    setTimeout(onDismiss, 800);
+  }, [onDismiss]);
 
   return (
     <div
@@ -143,11 +221,31 @@ function StatusHeader({ status, pulse, onPulseEnd, onDismiss }: StatusHeaderProp
         />
       )}
 
-      {/* Status icon */}
+      {/* Icon — play/pause button in voice mode, emoji otherwise */}
       <div className="relative flex items-center justify-center">
-        <span className={["w-20 h-20 rounded-full flex items-center justify-center text-4xl", style.dot].join(" ")}>
-          {status.icon}
-        </span>
+        {isVoice ? (
+          <button
+            onClick={handlePlayPause}
+            disabled={fetchingUrl}
+            className={[
+              "w-20 h-20 rounded-full flex items-center justify-center",
+              "active:scale-95 transition-transform disabled:opacity-50",
+              style.dot,
+            ].join(" ")}
+          >
+            {fetchingUrl ? (
+              <span className={`w-6 h-6 rounded-full border-2 border-purple-200 ${style.spin} animate-spin`} />
+            ) : playing ? (
+              <Pause className="w-8 h-8 text-purple-600" />
+            ) : (
+              <Play className="w-8 h-8 text-purple-600 translate-x-0.5" />
+            )}
+          </button>
+        ) : (
+          <span className={["w-20 h-20 rounded-full flex items-center justify-center text-4xl", style.dot].join(" ")}>
+            {status.icon}
+          </span>
+        )}
         {status.kind === 'safe' && (
           <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-emerald-500 ring-2 ring-white animate-pulse" />
         )}
@@ -158,21 +256,50 @@ function StatusHeader({ status, pulse, onPulseEnd, onDismiss }: StatusHeaderProp
         {status.label}
       </p>
 
-      {/* Subtext */}
-      <p className="text-sm text-slate-400">{status.subtext}</p>
+      {/* Voice: progress bar + timestamps */}
+      {isVoice ? (
+        <div className="w-full flex flex-col gap-1.5 px-2">
+          <div className="w-full h-1.5 bg-purple-100 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-purple-400 rounded-full"
+              style={{
+                width: `${progress * 100}%`,
+                transition: progress === 0 ? 'none' : 'width 0.25s linear',
+              }}
+            />
+          </div>
+          <div className="flex justify-between text-xs text-purple-300">
+            <span>{formatSeconds(progress * (duration || 0))}</span>
+            {duration > 0 && <span>{formatSeconds(duration)}</span>}
+          </div>
+        </div>
+      ) : (
+        <p className="text-sm text-slate-400">{status.subtext}</p>
+      )}
 
-      {/* Dismiss — only on actionable statuses */}
+      {/* Dismiss button */}
       {status.dismissible && (
         <button
           onClick={onDismiss}
           className={[
             "mt-1 text-xs px-4 py-1.5 rounded-full border transition-all active:scale-95",
-            style.text,
-            "border-current opacity-60 hover:opacity-100",
+            style.text, "border-current opacity-60 hover:opacity-100",
           ].join(" ")}
         >
           已处理
         </button>
+      )}
+
+      {/* Hidden audio element — rendered only once signedUrl is ready */}
+      {signedUrl && (
+        <audio
+          ref={audioRef}
+          src={signedUrl}
+          onTimeUpdate={handleTimeUpdate}
+          onLoadedMetadata={handleLoadedMetadata}
+          onEnded={handleEnded}
+          className="hidden"
+        />
       )}
     </div>
   );

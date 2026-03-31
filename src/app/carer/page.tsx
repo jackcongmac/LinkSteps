@@ -124,13 +124,12 @@ interface HealthData {
 
 interface SleepSession {
   id:           string;
-  started_at:   string | null;
-  ended_at:     string | null;
-  // current_state omitted — not yet in PostgREST schema cache
+  session_date: string;
   total_hours:  number | null;
   deep_hours:   number | null;
   light_hours:  number | null;
   rem_hours:    number | null;
+  // started_at / ended_at / current_state omitted until schema cache refreshed
 }
 
 // ── Status derivation ─────────────────────────────────────────
@@ -570,17 +569,8 @@ interface SleepInsightsCardProps {
 }
 
 function SleepInsightsCard({ session }: SleepInsightsCardProps) {
-  const isNightWatch     = session !== null && session.ended_at === null && session.started_at !== null;
-  const isMorningSummary = session !== null && session.ended_at !== null;
-
-  const startedAtBj = session?.started_at
-    ? new Date(session.started_at).toLocaleString("zh-CN", {
-        timeZone: "Asia/Shanghai",
-        hour:     "2-digit",
-        minute:   "2-digit",
-        hour12:   false,
-      })
-    : null;
+  const isMorningSummary = session !== null && session.total_hours !== null;
+  const isNightWatch     = session !== null && session.total_hours === null;
 
   const deepWarn = isMorningSummary && (session.deep_hours ?? 0) < 1.5;
 
@@ -619,9 +609,6 @@ function SleepInsightsCard({ session }: SleepInsightsCardProps) {
           <span className="px-4 py-2 rounded-full text-base font-medium bg-indigo-500/30 text-indigo-200">
             监测中…
           </span>
-          {startedAtBj && (
-            <p className="text-slate-400 text-xs">入睡时间 {startedAtBj}</p>
-          )}
         </div>
       ) : (
         <div className="flex flex-col gap-3">
@@ -877,19 +864,14 @@ export default function CarerDashboard() {
       }
 
       // ── Demo seed: upsert last night's sleep with requested values ────
-      // Compute yesterday's date and timestamps in Beijing timezone.
-      const bjNow        = new Date().toLocaleString("en-US", { timeZone: "Asia/Shanghai" });
-      const bjToday      = new Date(bjNow);
-      const bjYesterday  = new Date(bjNow);
+      // Compute yesterday's date in Beijing timezone.
+      const bjNow       = new Date().toLocaleString("en-US", { timeZone: "Asia/Shanghai" });
+      const bjYesterday = new Date(bjNow);
       bjYesterday.setDate(bjYesterday.getDate() - 1);
-      const yy   = bjYesterday.getFullYear();
-      const ymm  = String(bjYesterday.getMonth() + 1).padStart(2, "0");
-      const ydd  = String(bjYesterday.getDate()).padStart(2, "0");
+      const yy  = bjYesterday.getFullYear();
+      const ymm = String(bjYesterday.getMonth() + 1).padStart(2, "0");
+      const ydd = String(bjYesterday.getDate()).padStart(2, "0");
       const yesterdayStr = `${yy}-${ymm}-${ydd}`;
-      // 22:30 BJ yesterday → UTC (BJ = UTC+8)
-      const seedStartedAt = new Date(Date.UTC(yy, bjYesterday.getMonth(), bjYesterday.getDate(), 22 - 8, 30)).toISOString();
-      // 06:15 BJ today → UTC
-      const seedEndedAt   = new Date(Date.UTC(bjToday.getFullYear(), bjToday.getMonth(), bjToday.getDate(), 6 - 8, 15)).toISOString();
 
       await (supabase as any)
         .from("sleep_sessions")
@@ -897,8 +879,6 @@ export default function CarerDashboard() {
           {
             senior_id:    id,
             session_date: yesterdayStr,
-            started_at:   seedStartedAt,
-            ended_at:     seedEndedAt,
             total_hours:  7.33,   // 7h 20m
             deep_hours:   2.17,   // 2h 10m
             light_hours:  4.0,
@@ -910,9 +890,9 @@ export default function CarerDashboard() {
       // ── Query most recent sleep session (no cutoff — just ORDER + LIMIT) ─
       const { data: sleepRows, error: sleepError } = await supabase
         .from("sleep_sessions")
-        .select("id, started_at, ended_at, total_hours, deep_hours, light_hours, rem_hours")
+        .select("id, session_date, total_hours, deep_hours, light_hours, rem_hours")
         .eq("senior_id", id)
-        .order("started_at", { ascending: false })
+        .order("session_date", { ascending: false })
         .limit(1);
 
       if (sleepError) {
@@ -1008,7 +988,7 @@ export default function CarerDashboard() {
           const updated = payload.new;
           if (updated.senior_id !== seniorId) return;
           setSleepSession(updated);
-          console.log(`[sleep-realtime] updated ended_at=${updated.ended_at ?? "null"}`);
+          console.log(`[sleep-realtime] updated session_date=${updated.session_date}`);
         },
       )
       .on(

@@ -18,6 +18,7 @@ CREATE TABLE sleep_sessions (
 );
 
 ALTER TABLE sleep_sessions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE sleep_sessions REPLICA IDENTITY FULL;
 
 -- Creator (the user who owns the senior_profile) has full access.
 -- This covers the simulator, which runs as the creator user in the browser.
@@ -52,6 +53,7 @@ BEGIN
     SELECT 1 FROM pg_publication_tables
     WHERE pubname = 'supabase_realtime'
       AND tablename = 'sleep_sessions'
+      AND schemaname = 'public'
   ) THEN
     ALTER PUBLICATION supabase_realtime ADD TABLE sleep_sessions;
   END IF;

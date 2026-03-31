@@ -54,7 +54,10 @@ export default function VoiceRecorder({ seniorId }: Props) {
       const blob      = new Blob(chunksRef.current, { type: mimeType });
       const ext       = mimeType.includes("webm") ? "webm" : "mp4";
       const messageId = crypto.randomUUID();
-      const path      = `${seniorId}/${messageId}.${ext}`;
+
+      // Path uses seniorId — must match Storage folder and DB audio_url
+      const path = `${seniorId}/${messageId}.${ext}`;
+      console.log("[DEBUG] Final Audio Path:", path);
 
       const { error: uploadError } = await supabase.storage
         .from("voice-memos")

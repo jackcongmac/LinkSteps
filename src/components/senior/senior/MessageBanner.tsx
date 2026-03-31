@@ -12,8 +12,6 @@ interface Props {
 
 export default function MessageBanner({ message, isNew, onMarkRead }: Props) {
   const readTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const ttsAvailable =
-    typeof window !== "undefined" && "speechSynthesis" in window;
 
   // Auto-mark read after 3 seconds of visibility
   useEffect(() => {
@@ -27,15 +25,6 @@ export default function MessageBanner({ message, isNew, onMarkRead }: Props) {
       if (readTimerRef.current) clearTimeout(readTimerRef.current);
     };
   }, [message?.id, message?.is_read, onMarkRead]);
-
-  function speak() {
-    if (!message?.content || !ttsAvailable) return;
-    window.speechSynthesis.cancel();
-    const utt = new SpeechSynthesisUtterance(message.content);
-    utt.lang = "zh-CN";
-    utt.rate = 0.88;
-    window.speechSynthesis.speak(utt);
-  }
 
   return (
     <div className="relative w-full max-w-xs">
@@ -62,28 +51,20 @@ export default function MessageBanner({ message, isNew, onMarkRead }: Props) {
         </div>
       )}
 
-      {/* Message bubble — tappable for TTS */}
-      <button
-        onClick={speak}
-        disabled={!message}
+      {/* Message bubble — read-only display */}
+      <div
         className={[
-          "w-full rounded-3xl px-5 py-4 text-left",
+          "w-full rounded-3xl px-5 py-4",
           "border transition-all duration-300",
           message
-            ? "bg-white border-slate-100 shadow-sm active:scale-[0.98] cursor-pointer"
-            : "bg-slate-50 border-slate-100 cursor-default",
+            ? "bg-white border-slate-100 shadow-sm"
+            : "bg-slate-50 border-slate-100",
         ].join(" ")}
-        aria-label={message ? "点击朗读消息" : undefined}
       >
         <div className="flex items-start gap-3">
           <span className="text-2xl shrink-0 mt-0.5">💬</span>
           <div className="flex-1 min-w-0">
-            <p className="text-xs text-slate-400 mb-1 flex items-center gap-1.5">
-              Jack 的留言
-              {ttsAvailable && message && (
-                <span className="text-slate-300 text-xs">· 点击朗读 🔊</span>
-              )}
-            </p>
+            <p className="text-xs text-slate-400 mb-1">Jack 的留言</p>
             <p
               className={[
                 "text-lg leading-relaxed break-words",
@@ -94,7 +75,7 @@ export default function MessageBanner({ message, isNew, onMarkRead }: Props) {
             </p>
           </div>
         </div>
-      </button>
+      </div>
     </div>
   );
 }

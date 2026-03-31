@@ -111,7 +111,7 @@ const T = {
   sleep: { low: 6.5,    veryLow: 5 },
   hrv:   { low: 20,     veryLow: 15 },       // ms — higher = better
   pollen:{ high: 7,     veryHigh: 9 },        // EPA 0–10 scale
-  tempF: { hot: 95,     cold: 40 },           // °F
+  tempC: { hot: 35,     cold: 4 },             // °C
 } as const;
 
 // ── Internal rule type ────────────────────────────────────────
@@ -256,23 +256,23 @@ function evaluate(m: LogMetadata): RuleHit[] {
 
   // Temperature
   if (m.temperature !== undefined) {
-    if (m.temperature >= T.tempF.hot) {
-      const danger = clamp((m.temperature - T.tempF.hot) / 15, 0.4, 1);
+    if (m.temperature >= T.tempC.hot) {
+      const danger = clamp((m.temperature - T.tempC.hot) / 10, 0.4, 1);
       hits.push({
         severity: 'caution',
         factor: 'Extreme heat',
-        detail: `${m.temperature}°F — ${Math.round(m.temperature - T.tempF.hot)}°F above high threshold (${T.tempF.hot}°F).`,
-        prescription: `Temperature: ${m.temperature}°F (threshold: ${T.tempF.hot}°F)`,
-        metric: { label: 'Temperature', icon: '🌡️', value: `${m.temperature}°F`, danger, barColor: 'bg-amber-400' },
+        detail: `${m.temperature}°C — ${Math.round(m.temperature - T.tempC.hot)}°C above high threshold (${T.tempC.hot}°C).`,
+        prescription: `Temperature: ${m.temperature}°C (threshold: ${T.tempC.hot}°C)`,
+        metric: { label: 'Temperature', icon: '🌡️', value: `${m.temperature}°C`, danger, barColor: 'bg-amber-400' },
       });
-    } else if (m.temperature <= T.tempF.cold) {
-      const danger = clamp((T.tempF.cold - m.temperature) / 20, 0.3, 0.8);
+    } else if (m.temperature <= T.tempC.cold) {
+      const danger = clamp((T.tempC.cold - m.temperature) / 10, 0.3, 0.8);
       hits.push({
         severity: 'caution',
         factor: 'Cold weather',
-        detail: `${m.temperature}°F — ${Math.round(T.tempF.cold - m.temperature)}°F below cold threshold (${T.tempF.cold}°F).`,
-        prescription: `Temperature: ${m.temperature}°F (threshold: ${T.tempF.cold}°F)`,
-        metric: { label: 'Temperature', icon: '🌡️', value: `${m.temperature}°F`, danger, barColor: 'bg-sky-400' },
+        detail: `${m.temperature}°C — ${Math.round(T.tempC.cold - m.temperature)}°C below cold threshold (${T.tempC.cold}°C).`,
+        prescription: `Temperature: ${m.temperature}°C (threshold: ${T.tempC.cold}°C)`,
+        metric: { label: 'Temperature', icon: '🌡️', value: `${m.temperature}°C`, danger, barColor: 'bg-sky-400' },
       });
     }
   }

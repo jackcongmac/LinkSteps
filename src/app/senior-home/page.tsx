@@ -1,7 +1,7 @@
 // src/app/senior-home/page.tsx
 "use client";
 
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { createClient } from "@/lib/supabase";
 import type { RealtimePostgresInsertPayload } from "@supabase/supabase-js";
 import PeaceButton    from "@/components/senior/senior/PeaceButton";
@@ -11,30 +11,31 @@ import QuickRequest   from "@/components/senior/senior/QuickRequest";
 import type { MessageRow } from "@/types/messages";
 
 export default function SeniorHomePage() {
-  const supabase = createClient();
+  // ── Stable Supabase instance — never recreate on render ──────
+  const supabase = useMemo(() => createClient(), []);
 
-  const [seniorId,     setSeniorId]     = useState<string | null>(null);
-  const [latestMsg,    setLatestMsg]    = useState<MessageRow | null>(null);
-  const [msgIsNew,     setMsgIsNew]     = useState(false);
-  const [loading,      setLoading]      = useState(true);
-  const [ready,        setReady]        = useState(false);
+  const [seniorId,  setSeniorId]  = useState<string | null>(null);
+  const [latestMsg, setLatestMsg] = useState<MessageRow | null>(null);
+  const [msgIsNew,  setMsgIsNew]  = useState(false);
+  const [loading,   setLoading]   = useState(true);
+  const [ready,     setReady]     = useState(false);
 
-  const seniorIdRef = useRef<string | null>(null);
-
-  // ── Load senior profile + latest carer message ────────────
+  // ── Load senior profile + latest carer message ────────────────
   const loadData = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { setLoading(false); return; }
 
-    const { data: profile } = await supabase
+    // Use limit(1) — same as carer dashboard — so both devices resolve
+    // the same senior_profile row (e.g. 3d778d6b8b09) and share one
+    // senior_id for messages + storage paths.
+    const { data: profiles } = await supabase
       .from("senior_profiles")
       .select("id")
-      .eq("created_by", user.id)
-      .single();
+      .limit(1);
 
-    const id = (profile as { id: string } | null)?.id ?? null;
+    const id = (profiles?.[0] as { id: string } | undefined)?.id ?? null;
+    console.log("[DEBUG] Senior resolved seniorId:", id);
     setSeniorId(id);
-    seniorIdRef.current = id;
 
     if (id) {
       const { data: msgs } = await supabase
@@ -55,32 +56,94 @@ export default function SeniorHomePage() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  // ── Realtime: new carer message ───────────────────────────
+  // ── Realtime: subscribe once seniorId is known ────────────────
+  // Broad subscription (no server-side filter) — client-side match.
+  // Re-runs whenever seniorId changes (initially null → then real id).
   useEffect(() => {
-    const channel = supabase
+    if (!seniorId) return;
+
+    let channel = supabase
       .channel("senior-home-messages")
       .on(
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "messages" },
         (payload: RealtimePostgresInsertPayload<MessageRow>) => {
           const incoming = payload.new;
+          // Only care about carer text messages for THIS senior
           if (
-            incoming.senior_id !== seniorIdRef.current ||
-            incoming.sender_role !== "carer" ||
-            incoming.type !== "text"
+            incoming.senior_id  !== seniorId ||
+            incoming.sender_role !== "carer"  ||
+            incoming.type        !== "text"
           ) return;
 
+          console.log("[senior-realtime] new carer message:", incoming.id);
           setLatestMsg(incoming);
           setMsgIsNew(true);
           setTimeout(() => setMsgIsNew(false), 1400);
         },
       )
-      .subscribe();
+      .subscribe((status) => {
+        console.log("[senior-realtime] channel status:", status);
+      });
 
-    return () => { supabase.removeChannel(channel); };
-  }, [supabase]);
+    // ── Keep-alive for mobile browsers ───────────────────────────
+    // Xiaomi / Android Chrome suspends WebSocket when screen dims.
+    // On visibilitychange → visible, tear down stale channel and
+    // re-subscribe, then re-fetch in case we missed messages.
+    const handleVisibility = () => {
+      if (document.visibilityState !== "visible") return;
+      console.log("[senior-realtime] page visible — resubscribing");
+      supabase.removeChannel(channel);
+      channel = supabase
+        .channel("senior-home-messages-revival")
+        .on(
+          "postgres_changes",
+          { event: "INSERT", schema: "public", table: "messages" },
+          (payload: RealtimePostgresInsertPayload<MessageRow>) => {
+            const incoming = payload.new;
+            if (
+              incoming.senior_id  !== seniorId ||
+              incoming.sender_role !== "carer"  ||
+              incoming.type        !== "text"
+            ) return;
+            console.log("[senior-realtime] new carer message (revival):", incoming.id);
+            setLatestMsg(incoming);
+            setMsgIsNew(true);
+            setTimeout(() => setMsgIsNew(false), 1400);
+          },
+        )
+        .subscribe((status) => {
+          console.log("[senior-realtime] revival channel:", status);
+        });
 
-  // ── Mark message as read ──────────────────────────────────
+      // Also re-fetch to catch any messages missed while suspended
+      supabase
+        .from("messages")
+        .select("*")
+        .eq("senior_id", seniorId)
+        .eq("type", "text")
+        .eq("sender_role", "carer")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .then(({ data }) => {
+          const latest = (data as MessageRow[] | null)?.[0] ?? null;
+          if (latest) {
+            setLatestMsg((prev) =>
+              !prev || latest.created_at > prev.created_at ? latest : prev,
+            );
+          }
+        });
+    };
+
+    document.addEventListener("visibilitychange", handleVisibility);
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibility);
+      supabase.removeChannel(channel);
+    };
+  }, [supabase, seniorId]);
+
+  // ── Mark message as read ──────────────────────────────────────
   const handleMarkRead = useCallback(async (id: string) => {
     const { error } = await supabase
       .from("messages")
@@ -94,7 +157,7 @@ export default function SeniorHomePage() {
     setLatestMsg((prev) => prev ? { ...prev, is_read: true } : prev);
   }, [supabase]);
 
-  // ── Loading ───────────────────────────────────────────────
+  // ── Loading ───────────────────────────────────────────────────
   if (loading) {
     return (
       <main className="min-h-screen bg-stone-50 flex items-center justify-center">
@@ -113,7 +176,7 @@ export default function SeniorHomePage() {
     );
   }
 
-  // ── Main ──────────────────────────────────────────────────
+  // ── Main ──────────────────────────────────────────────────────
   return (
     <main
       className={[

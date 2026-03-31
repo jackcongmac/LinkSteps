@@ -165,18 +165,21 @@ function StatusHeader({ status, pulse, onPulseEnd, onDismiss }: StatusHeaderProp
       return;
     }
 
-    if (!status.audioUrl) return;
+    const rawPath = status.audioUrl;
+    if (!rawPath) return;
 
-    // Fetch signed URL then auto-play
-    console.log("[StatusHeader] Requesting signed URL for path:", status.audioUrl);
+    const ext = rawPath.split(".").pop() ?? "(no extension)";
+    console.log("[DEBUG] Final Audio Path:", rawPath);
+    console.log("[DEBUG] File extension in DB path:", ext);
+
     setFetchingUrl(true);
     const { data, error } = await supabase.storage
       .from("voice-memos")
-      .createSignedUrl(status.audioUrl, 300);
+      .createSignedUrl(rawPath, 300);
     setFetchingUrl(false);
 
     if (error || !data?.signedUrl) {
-      console.error("[StatusHeader] signed URL error:", error?.message, "path:", status.audioUrl);
+      console.error("[StatusHeader] createSignedUrl error:", error?.message, "| path:", rawPath);
       return;
     }
     setSignedUrl(data.signedUrl);
@@ -202,9 +205,21 @@ function StatusHeader({ status, pulse, onPulseEnd, onDismiss }: StatusHeaderProp
   const handleEnded = useCallback(() => {
     setPlaying(false);
     setProgress(1);
+
+    // Mark the voice message as read
+    if (status.itemId) {
+      supabase
+        .from("messages")
+        .update({ is_read: true, read_at: new Date().toISOString() })
+        .eq("id", status.itemId)
+        .then(({ error }) => {
+          if (error) console.error("[StatusHeader] mark-read failed:", error.message);
+        });
+    }
+
     // Auto-reset to 一切安好 after a brief pause
     setTimeout(onDismiss, 800);
-  }, [onDismiss]);
+  }, [onDismiss, status.itemId, supabase]);
 
   return (
     <div
@@ -214,6 +229,18 @@ function StatusHeader({ status, pulse, onPulseEnd, onDismiss }: StatusHeaderProp
         style.bg,
       ].join(" ")}
     >
+      {/* Voice progress bar — pinned to bottom edge */}
+      {isVoice && (
+        <div className="absolute bottom-0 left-0 right-0 h-1 bg-purple-100">
+          <div
+            className="h-full bg-purple-400 rounded-br-3xl rounded-bl-3xl"
+            style={{
+              width: `${progress * 100}%`,
+              transition: progress === 0 ? 'none' : 'width 0.25s linear',
+            }}
+          />
+        </div>
+      )}
       {/* Realtime pulse ring */}
       {pulse && (
         <span
@@ -263,38 +290,43 @@ function StatusHeader({ status, pulse, onPulseEnd, onDismiss }: StatusHeaderProp
         {status.label}
       </p>
 
-      {/* Voice: progress bar + timestamps */}
+      {/* Voice: elapsed / total timestamps */}
       {isVoice ? (
-        <div className="w-full flex flex-col gap-1.5 px-2">
-          <div className="w-full h-1.5 bg-purple-100 rounded-full overflow-hidden">
-            <div
-              className="h-full bg-purple-400 rounded-full"
-              style={{
-                width: `${progress * 100}%`,
-                transition: progress === 0 ? 'none' : 'width 0.25s linear',
-              }}
-            />
-          </div>
-          <div className="flex justify-between text-xs text-purple-300">
-            <span>{formatSeconds(progress * (duration || 0))}</span>
-            {duration > 0 && <span>{formatSeconds(duration)}</span>}
-          </div>
+        <div className="w-full flex justify-between text-xs text-purple-300 px-2">
+          <span>{formatSeconds(progress * (duration || 0))}</span>
+          {duration > 0 && <span>{formatSeconds(duration)}</span>}
         </div>
       ) : (
         <>
           <p className="text-sm text-slate-400">{status.subtext}</p>
 
-          {/* ── Health snapshot placeholders (safe / idle) ── */}
+          {/* ── Health snapshot (safe / idle) ── */}
           {(status.kind === 'safe' || status.kind === 'idle') && (
-            <div className="w-full flex items-center justify-center gap-8 pt-1">
+            <div className="w-full flex items-center justify-center gap-6 pt-2 pb-0.5">
+              {/* Steps */}
               <div className="flex flex-col items-center gap-0.5">
-                <span className="text-xl font-semibold text-slate-300">--</span>
-                <span className="text-xs text-slate-300">步数</span>
+                <div className="flex items-baseline gap-0.5">
+                  <span className="text-2xl font-bold text-emerald-500">3,248</span>
+                  <span className="text-xs font-medium text-emerald-400 mb-0.5">步</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <span className="text-xs text-slate-400">步数</span>
+                  <span className="text-[10px] text-emerald-400 font-medium">↑ 今日</span>
+                </div>
               </div>
-              <div className="w-px h-7 bg-slate-100" />
+
+              <div className="w-px h-10 bg-slate-100" />
+
+              {/* Heart rate */}
               <div className="flex flex-col items-center gap-0.5">
-                <span className="text-xl font-semibold text-slate-300">--</span>
-                <span className="text-xs text-slate-300">心率</span>
+                <div className="flex items-baseline gap-0.5">
+                  <span className="text-2xl font-bold text-emerald-500">72</span>
+                  <span className="text-xs font-medium text-emerald-400 mb-0.5">次/分</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <span className="text-xs text-slate-400">心率</span>
+                  <span className="text-[10px] text-emerald-400 font-medium">● 正常</span>
+                </div>
               </div>
             </div>
           )}

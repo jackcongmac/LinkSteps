@@ -15,7 +15,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 
 // Routes that require a valid session
-const PROTECTED_PREFIXES = ['/log', '/insights', '/dashboard', '/settings'];
+const PROTECTED_PREFIXES = ['/log', '/insights', '/dashboard', '/settings', '/senior-home', '/carer'];
 
 // Routes that are only for unauthenticated users
 const AUTH_ONLY_ROUTES = ['/login'];
@@ -81,7 +81,8 @@ export async function middleware(request: NextRequest) {
       appUrl.pathname = nextPath;
       appUrl.search = nextQuery ? `?${nextQuery}` : '';
     } else {
-      appUrl.pathname = '/log';
+      // No ?next= — send to root, which will role-route to the right page
+      appUrl.pathname = '/';
       appUrl.search = '';
     }
     return NextResponse.redirect(appUrl);

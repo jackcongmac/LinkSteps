@@ -33,6 +33,8 @@ import {
 import type { DayMood, LogEntry, LogMetadata, AIInsights, ForecastInsight } from "@/lib/mood-log";
 import { generateDailyForecast } from "@/lib/predictor";
 import type { ForecastResult, ThreatLevel } from "@/lib/predictor";
+import { generateSeniorInsight, MOCK_TODAY_METRICS, DAD_BASELINE } from "@/lib/senior-predictor";
+import type { SeniorInsight, SeniorStatus } from "@/lib/senior-predictor";
 import type { MoodLevel, MoodIconName } from "@/components/ui/mood-picker";
 
 // ── Types ────────────────────────────────────────────────────
@@ -43,6 +45,13 @@ interface ChildRecord {
 }
 
 type SaveStatus = "idle" | "loading" | "success" | "error";
+
+/**
+ * App mode toggle.
+ * CHILD  — default ASD/ADHD daily log (Ethan)
+ * SENIOR — Parental Wellness Dashboard (Dad, 70+)
+ */
+type AppMode = 'CHILD' | 'SENIOR';
 
 const AVATAR_COLORS = [
   "bg-sky-400",
@@ -215,6 +224,12 @@ function LogPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
+  // Mode toggle — default CHILD, switch to SENIOR for Parental Wellness Dashboard
+  const [appMode, setAppMode] = useState<AppMode>('CHILD');
+
+  // Senior mode: live Beijing weather injected into SeniorMetrics
+  const [seniorWeather, setSeniorWeather] = useState<{ pressure: number; temp_c: number; text: string } | null>(null);
+
   const [children, setChildren] = useState<ChildRecord[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [status, setStatus] = useState<SaveStatus>("idle");
@@ -304,6 +319,18 @@ function LogPageInner() {
     getTodayMetadata().then(setTodayMetadata).catch(() => null);
     getAIInsights().then(setAiData).catch(() => null);
   }, [refreshLogs]);
+
+  // Senior mode: fetch Beijing weather when mode switches to SENIOR
+  useEffect(() => {
+    if (appMode !== 'SENIOR') return;
+    fetch('/api/weather?city=beijing')
+      .then((r) => r.json())
+      .then((d: { pressure?: number; temp_c?: number; text?: string; error?: string }) => {
+        if (d.error || !d.pressure) return;
+        setSeniorWeather({ pressure: d.pressure, temp_c: d.temp_c ?? 0, text: d.text ?? '' });
+      })
+      .catch(() => null); // non-fatal — falls back to MOCK_TODAY_METRICS values
+  }, [appMode]);
 
   // Load child name + birthday from profile; re-read whenever Settings saves (custom event)
   useEffect(() => {
@@ -426,31 +453,69 @@ function LogPageInner() {
         {/* ── Page header ───────────────────────────────────── */}
         <div className="flex items-start justify-between">
           <div>
-            <h1 className="text-base font-semibold text-slate-700">Daily Log</h1>
+            <h1 className="text-base font-semibold text-slate-700">
+              {appMode === 'SENIOR' ? 'Parental Wellness Dashboard' : 'Daily Log'}
+            </h1>
             <p className="text-xs text-slate-400 mt-0.5">
-              How is {displayChildName || "Ethan"} feeling today?
+              {appMode === 'SENIOR'
+                ? "Dad's wellness today"
+                : `How is ${displayChildName || "Ethan"} feeling today?`}
             </p>
-            {/* Sensory weather badge — real data or "Livermore, CA" placeholder */}
+            {/* Sensory weather badge — real data or location placeholder */}
             <WeatherWidget metadata={todayMetadata} />
           </div>
-          <Link
-            href="/settings"
-            aria-label="Settings"
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white shadow-sm active:scale-95 transition-transform hover:bg-slate-50"
-          >
-            <Settings className="h-4 w-4 text-slate-500" aria-hidden="true" />
-          </Link>
+          <div className="flex items-center gap-2">
+            {/* Mode toggle pill — CHILD ↔ SENIOR */}
+            <button
+              type="button"
+              onClick={() => setAppMode((m) => m === 'CHILD' ? 'SENIOR' : 'CHILD')}
+              className={`text-[10px] font-semibold px-2.5 py-1 rounded-full transition-colors active:scale-95 ${
+                appMode === 'SENIOR'
+                  ? 'bg-violet-100 text-violet-600'
+                  : 'bg-slate-100 text-slate-400 hover:bg-slate-200'
+              }`}
+              aria-label={`Switch to ${appMode === 'CHILD' ? 'Senior' : 'Child'} mode`}
+            >
+              {appMode === 'SENIOR' ? '👴 Senior' : '👤 Child'}
+            </button>
+            <Link
+              href="/settings"
+              aria-label="Settings"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white shadow-sm active:scale-95 transition-transform hover:bg-slate-50"
+            >
+              <Settings className="h-4 w-4 text-slate-500" aria-hidden="true" />
+            </Link>
+          </div>
         </div>
 
-        {/* ── Mission Control — Today's Outlook (always visible) ── */}
-        {/* null metadata → gentle green "Waiting for data" default.
-            Real metadata → live 5-factor sensory forecast for Ethan.
-            SHOW_DEMO injects DEMO_METADATA to simulate a triple-threat day. */}
-        <OutlookCard
-          metadata={SHOW_DEMO ? DEMO_METADATA : todayMetadata}
-          childName={displayChildName ?? undefined}
-          viewMode={new Date().getHours() < 12 ? "AM" : "PM"}
-        />
+        {/* ── Senior mode: Parental Wellness card ──────────────── */}
+        {/* Merges live Beijing weather (pressure/temp) into mock biometric data.
+            When weather fetch is pending, falls back to MOCK_TODAY_METRICS values. */}
+        {appMode === 'SENIOR' && (
+          <SeniorOutlookCard
+            insight={generateSeniorInsight(
+              {
+                ...MOCK_TODAY_METRICS,
+                ...(seniorWeather && {
+                  pressure: seniorWeather.pressure,
+                }),
+              },
+              DAD_BASELINE,
+            )}
+            weatherText={seniorWeather?.text ?? null}
+            tempC={seniorWeather?.temp_c ?? null}
+            viewMode={new Date().getHours() < 12 ? "AM" : "PM"}
+          />
+        )}
+
+        {/* ── Child mode: Mission Control — Today's Outlook ─────── */}
+        {appMode === 'CHILD' && (
+          <OutlookCard
+            metadata={SHOW_DEMO ? DEMO_METADATA : todayMetadata}
+            childName={displayChildName ?? undefined}
+            viewMode={new Date().getHours() < 12 ? "AM" : "PM"}
+          />
+        )}
 
         {/* ── Tomorrow's Forecast — set SHOW_TOMORROW_FORECAST = false to hide */}
         {SHOW_TOMORROW_FORECAST && aiData?.forecast && (
@@ -725,7 +790,7 @@ function DailySloganCard({ ageYears }: { ageYears?: number }) {
 // ── WeatherWidget ────────────────────────────────────────────
 //
 // Compact 2-line sensor badge shown below the page subtitle.
-// Row 1: weather emoji + temperature (°F)
+// Row 1: weather emoji + temperature (°C)
 // Row 2: most important factor — pressure is always priority-1
 //
 // Data source: todayMetadata (logs.metadata JSONB).
@@ -742,10 +807,11 @@ function WeatherWidget({ metadata }: { metadata: LogMetadata | null }) {
   }
 
   // ── Row 1: weather icon + temperature ──────────────────────
+  // LogMetadata.temperature stored in °F — convert to °C for display
   const tempStr =
     metadata.temperature !== undefined
-      ? `${Math.round(metadata.temperature)}°F`
-      : "—°F";
+      ? `${Math.round((metadata.temperature - 32) * 5 / 9)}°C`
+      : "—°C";
 
   // Icon driven by the worst active signal (pressure → pollen → default)
   let weatherEmoji = "☀️";
@@ -770,6 +836,79 @@ function WeatherWidget({ metadata }: { metadata: LogMetadata | null }) {
       <span className="text-[11px] text-slate-400">{weatherEmoji} {tempStr}</span>
       <span className="text-[10px] text-slate-300" aria-hidden="true">·</span>
       <span className={`text-[11px] ${factor.className}`}>{factor.text}</span>
+    </div>
+  );
+}
+
+// ── SeniorOutlookCard ─────────────────────────────────────────────
+//
+// Parental Wellness Dashboard card — renders a SeniorInsight from
+// generateSeniorInsight(). Reuses THREAT_STYLE for colour consistency.
+//   stable   → normal   (emerald green)
+//   care     → elevated (amber)
+//   critical → critical (rose)
+
+const SENIOR_STATUS_LABEL: Record<'AM' | 'PM', string> = {
+  AM: '🌅 Morning Wellness',
+  PM: '🌇 Evening Check-in',
+};
+
+const SENIOR_STATUS_TO_THREAT: Record<SeniorStatus, ThreatLevel> = {
+  stable:   'normal',
+  care:     'elevated',
+  critical: 'critical',
+};
+
+function SeniorOutlookCard({
+  insight,
+  weatherText = null,
+  tempC = null,
+  viewMode = 'AM',
+}: {
+  insight: SeniorInsight;
+  weatherText?: string | null;   // e.g. "晴", "多云" from QWeather
+  tempC?: number | null;         // °C from live Beijing weather
+  viewMode?: 'AM' | 'PM';
+}) {
+  const s = THREAT_STYLE[SENIOR_STATUS_TO_THREAT[insight.status]];
+
+  return (
+    <div className={`rounded-2xl border-l-4 bg-white px-4 py-4 shadow-sm ${s.leftBorder}`}>
+      {/* Header row: label + live Beijing weather */}
+      <div className="flex items-center justify-between">
+        <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+          {SENIOR_STATUS_LABEL[viewMode]}
+        </p>
+        {(weatherText || tempC) && (
+          <p className="text-[10px] text-slate-400">
+            📍 北京 · {weatherText}{tempC != null ? ` · ${tempC}°C` : ''}
+          </p>
+        )}
+      </div>
+
+      {/* Headline + flag pills */}
+      <div className="mt-1.5 flex items-start justify-between gap-3">
+        <p className={`flex-1 text-sm font-medium leading-snug ${s.header}`}>
+          {insight.headline}
+        </p>
+        {insight.flags.length > 0 && (
+          <div className="flex shrink-0 flex-col gap-1 pt-0.5">
+            {insight.flags.map((f) => (
+              <span
+                key={f}
+                className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${s.pill}`}
+              >
+                {f}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Actionable caregiver message */}
+      <p className="mt-3 border-t border-slate-100 pt-2.5 text-[11px] leading-relaxed text-slate-500">
+        {insight.message}
+      </p>
     </div>
   );
 }

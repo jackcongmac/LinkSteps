@@ -171,6 +171,34 @@ export default function FamilyTimeline({ items }: Props) {
                 </>
               )}
 
+              {item.kind === "wechat_request" && (
+                <>
+                  <div className="inline-flex items-center gap-2 px-3 py-2 rounded-2xl bg-emerald-50 border border-emerald-100">
+                    <span className="text-base">💬</span>
+                    <p className="text-sm font-medium text-emerald-700">妈妈想和你微信视频</p>
+                  </div>
+                  <p className="text-xs text-slate-400 mt-1">
+                    {relativeTime(item.created_at)}
+                    <span className="mx-1.5 opacity-40">·</span>
+                    {absoluteHHMM(item.created_at)}
+                  </p>
+                </>
+              )}
+
+              {item.kind === "call_request" && (
+                <>
+                  <div className="inline-flex items-center gap-2 px-3 py-2 rounded-2xl bg-amber-50 border border-amber-100">
+                    <span className="text-base">📞</span>
+                    <p className="text-sm font-medium text-amber-700">妈妈想让你打电话</p>
+                  </div>
+                  <p className="text-xs text-slate-400 mt-1">
+                    {relativeTime(item.created_at)}
+                    <span className="mx-1.5 opacity-40">·</span>
+                    {absoluteHHMM(item.created_at)}
+                  </p>
+                </>
+              )}
+
             </div>
           </li>
         );

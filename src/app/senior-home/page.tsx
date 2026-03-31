@@ -4,9 +4,10 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { createClient } from "@/lib/supabase";
 import type { RealtimePostgresInsertPayload } from "@supabase/supabase-js";
-import PeaceButton   from "@/components/senior/senior/PeaceButton";
-import MessageBanner from "@/components/senior/senior/MessageBanner";
-import VoiceRecorder from "@/components/senior/senior/VoiceRecorder";
+import PeaceButton    from "@/components/senior/senior/PeaceButton";
+import MessageBanner  from "@/components/senior/senior/MessageBanner";
+import VoiceRecorder  from "@/components/senior/senior/VoiceRecorder";
+import QuickRequest   from "@/components/senior/senior/QuickRequest";
 import type { MessageRow } from "@/types/messages";
 
 export default function SeniorHomePage() {
@@ -133,7 +134,10 @@ export default function SeniorHomePage() {
         carerName="小杰"
       />
 
-      <VoiceRecorder seniorId={seniorId} />
+      <div className="flex flex-col gap-3 w-full max-w-xs">
+        <VoiceRecorder seniorId={seniorId} />
+        <QuickRequest  seniorId={seniorId} />
+      </div>
     </main>
   );
 }

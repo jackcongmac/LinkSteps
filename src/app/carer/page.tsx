@@ -13,7 +13,7 @@
  *   新信号到达 → 脉冲动画 → 无刷新更新时间线顶部
  */
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { createClient } from "@/lib/supabase";
 import type { CheckinRow } from "@/components/senior/carer/CheckinTimeline";
 import type { RealtimePostgresInsertPayload, RealtimePostgresUpdatePayload } from "@supabase/supabase-js";
@@ -189,7 +189,7 @@ function WeatherCard({ weather, loading }: WeatherCardProps) {
 // ── Page ──────────────────────────────────────────────────────
 
 export default function CarerDashboard() {
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
 
   const [seniorId,     setSeniorId]     = useState<string | null>(null);
   const [checkins,     setCheckins]     = useState<CheckinRow[]>([]);
@@ -248,9 +248,6 @@ export default function CarerDashboard() {
       if (messagesError) {
         console.error("[carer] messages query failed:", messagesError.message);
       }
-
-      console.log("[carer] messages loaded:", msgRows?.length ?? 0,
-        msgRows?.map((m) => ({ id: (m as MessageRow).id.slice(0, 8), type: (m as MessageRow).type })));
 
       setMessages((msgRows as MessageRow[]) ?? []);
     } else {

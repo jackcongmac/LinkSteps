@@ -974,12 +974,15 @@ export default function CarerDashboard() {
     setSeniorName(profile?.name ?? '');
 
     if (id) {
+      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+
       const { data: rows, error: checkinsError } = await supabase
         .from("checkins")
         .select("id, checked_in_at, source")
         .eq("senior_id", id)
+        .gte("checked_in_at", sevenDaysAgo)
         .order("checked_in_at", { ascending: false })
-        .limit(20);
+        .limit(500);
 
       if (checkinsError) {
         console.error('[carer] checkins query failed:', checkinsError.message, checkinsError.code);
@@ -991,8 +994,9 @@ export default function CarerDashboard() {
         .from("messages")
         .select("*")
         .eq("senior_id", id)
+        .gte("created_at", sevenDaysAgo)
         .order("created_at", { ascending: false })
-        .limit(40);
+        .limit(500);
 
       if (messagesError) {
         console.error("[carer] messages query failed:", messagesError.message);

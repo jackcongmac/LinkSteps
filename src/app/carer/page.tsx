@@ -179,10 +179,11 @@ function formatSeconds(s: number): string {
 
 function deriveStatus(feed: FeedItem[], dismissedId: string | null, seniorName: string): StatusInfo {
   const latest      = feed.find((item) => ACTION_KINDS.has(item.kind)) ?? null;
-  const lastCheckin = feed.find((i) => i.kind === 'checkin') ?? null;
-  const baseGood    = lastCheckin !== null && isWithin24h(lastCheckin.created_at);
-  const baseSubtext = lastCheckin
-    ? `最后平安信号：${relativeTime(lastCheckin.created_at)}`
+  const lastCheckin  = feed.find((i) => i.kind === 'checkin') ?? null;
+  const lastActivity = feed[0] ?? null;
+  const baseGood     = lastCheckin !== null && isWithin24h(lastCheckin.created_at);
+  const baseSubtext  = lastActivity
+    ? `最近消息：${relativeTime(lastActivity.created_at)}`
     : '还没有收到平安信号';
 
   if (!latest || latest.id === dismissedId || latest.kind === 'checkin') {

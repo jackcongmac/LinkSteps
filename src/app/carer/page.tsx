@@ -1292,7 +1292,7 @@ export default function CarerDashboard() {
               实时
             </span>
           </div>
-          <FamilyTimeline items={feed} />
+          <FamilyTimeline items={feed} seniorName={seniorName} />
         </div>
 
         {/* Footer */}

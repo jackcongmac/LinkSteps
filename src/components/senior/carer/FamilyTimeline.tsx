@@ -111,7 +111,7 @@ function VoicePlayButton({ audioUrl }: { audioUrl: string }) {
 
 // ── ItemContent ───────────────────────────────────────────────
 
-function ItemContent({ item, isLatest }: { item: FeedItem; isLatest: boolean }) {
+function ItemContent({ item, isLatest, seniorName }: { item: FeedItem; isLatest: boolean; seniorName: string }) {
   const labelCls = ["text-sm font-medium", isLatest ? "text-emerald-700" : "text-slate-600"].join(" ");
   const ts = <p className="text-xs text-slate-400">{formatTimestamp(item.created_at)}</p>;
 
@@ -151,7 +151,7 @@ function ItemContent({ item, isLatest }: { item: FeedItem; isLatest: boolean }) 
     <div className="flex flex-col gap-1 pt-0.5 flex-1 min-w-0">
       <div className="inline-flex items-center gap-2 px-3 py-2 rounded-2xl bg-emerald-50 border border-emerald-100">
         <span className="text-base">💬</span>
-        <p className="text-sm font-medium text-emerald-700">妈妈想和你微信视频</p>
+        <p className="text-sm font-medium text-emerald-700">给{seniorName}回个微信</p>
       </div>
       <p className="text-xs text-slate-400 mt-0.5">{formatTimestamp(item.created_at)}</p>
     </div>
@@ -161,7 +161,7 @@ function ItemContent({ item, isLatest }: { item: FeedItem; isLatest: boolean }) 
     <div className="flex flex-col gap-1 pt-0.5 flex-1 min-w-0">
       <div className="inline-flex items-center gap-2 px-3 py-2 rounded-2xl bg-amber-50 border border-amber-100">
         <span className="text-base">📞</span>
-        <p className="text-sm font-medium text-amber-700">妈妈想让你打电话</p>
+        <p className="text-sm font-medium text-amber-700">给{seniorName}回个电话</p>
       </div>
       <p className="text-xs text-slate-400 mt-0.5">{formatTimestamp(item.created_at)}</p>
     </div>
@@ -175,7 +175,7 @@ function ItemContent({ item, isLatest }: { item: FeedItem; isLatest: boolean }) 
 const MAX_DAYS = 7;
 const AUTO_COLLAPSE_MS = 3 * 60 * 1000; // 3 minutes
 
-export default function FamilyTimeline({ items }: { items: FeedItem[] }) {
+export default function FamilyTimeline({ items, seniorName }: { items: FeedItem[]; seniorName: string }) {
   const [daysShown, setDaysShown] = useState(1);
   const collapseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -258,7 +258,7 @@ export default function FamilyTimeline({ items }: { items: FeedItem[] }) {
                     <div className={`relative z-10 mt-1 w-5 h-5 rounded-full shrink-0 flex items-center justify-center ${dotCls}`}>
                       {isLatest && <div className="w-2 h-2 rounded-full bg-white" />}
                     </div>
-                    <ItemContent item={item} isLatest={isLatest} />
+                    <ItemContent item={item} isLatest={isLatest} seniorName={seniorName} />
                   </li>
                 );
               })}

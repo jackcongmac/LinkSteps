@@ -5,12 +5,13 @@ import { useState, useCallback, useMemo } from "react";
 import { createClient } from "@/lib/supabase";
 
 interface Props {
-  seniorId: string | null;
+  seniorId:   string | null;
+  seniorName?: string;
 }
 
 const MAX_CHARS = 100;
 
-export default function ComposeMessage({ seniorId }: Props) {
+export default function ComposeMessage({ seniorId, seniorName = "长辈" }: Props) {
   const [text,    setText]    = useState("");
   const [sending, setSending] = useState(false);
   const [sent,    setSent]    = useState(false);
@@ -67,7 +68,7 @@ export default function ComposeMessage({ seniorId }: Props) {
           value={text}
           onChange={(e) => { setText(e.target.value.slice(0, MAX_CHARS)); setErr(null); }}
           onKeyDown={(e) => e.key === "Enter" && send()}
-          placeholder="给妈妈发条消息…"
+          placeholder={`给${seniorName}发条消息…`}
           disabled={sending}
           className="flex-1 text-sm text-slate-700 placeholder:text-slate-300 outline-none bg-transparent"
         />

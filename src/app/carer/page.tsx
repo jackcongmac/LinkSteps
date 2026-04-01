@@ -964,9 +964,7 @@ export default function CarerDashboard() {
 
   // ── AI Wellness state ─────────────────────────────────────────
   type HrReading = { value: number; measured_at: string };
-  type Baselines = { avg_steps: number | null; avg_resting_hr: number | null; avg_sleep_hours: number | null } | null;
   const [hrReadings,     setHrReadings]     = useState<HrReading[]>([]);
-  const [baselines,      setBaselines]      = useState<Baselines>(null);
   const [wellnessInsight,setWellnessInsight]= useState<WellnessResult | null>(null);
   const [wellnessLoading,setWellnessLoading]= useState(true);
   const lastWellnessFetch = useRef<number>(0);
@@ -1058,17 +1056,7 @@ export default function CarerDashboard() {
         }
       }
 
-      // Fetch 7-day baselines for relative health scoring
-      const { data: baselineRow } = await supabase
-        .from("senior_baselines")
-        .select("avg_steps, avg_resting_hr, avg_sleep_hours")
-        .eq("senior_id", id)
-        .maybeSingle();
-
-      if (baselineRow) {
-        const b = baselineRow as { avg_steps: number | null; avg_resting_hr: number | null; avg_sleep_hours: number | null };
-        setBaselines({ avg_steps: b.avg_steps, avg_resting_hr: b.avg_resting_hr, avg_sleep_hours: b.avg_sleep_hours });
-      }
+      // Baselines are fetched server-side by /api/senior/wellness-insight
 
       // ── Demo seed: upsert last night's sleep with requested values ────
       // Compute yesterday's date in Beijing timezone.
@@ -1287,7 +1275,6 @@ export default function CarerDashboard() {
     steps:      number,
     pressure:   number,
     sleep:      number,
-    bls:        Baselines,
   ) => {
     const now = Date.now();
     // Throttle: max one AI call per 5 minutes
@@ -1296,19 +1283,18 @@ export default function CarerDashboard() {
 
     setWellnessLoading(true);
     try {
+      // Server route handles auth → profile → baselines → AI call
       const res = await fetch("/api/senior/wellness-insight", {
         method:  "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          metrics:   { pressure, sleep, steps, heartRate: smoothedHr },
-          baselines: bls,
+          metrics: { pressure, sleep, steps, heartRate: smoothedHr },
         }),
       });
       if (res.ok) {
         const insight = await res.json() as WellnessResult;
         setWellnessInsight(insight);
       } else {
-        // Fallback: compute locally
         setWellnessInsight(calculateSeniorWellness({ pressure, sleep, steps, heartRate: smoothedHr }));
       }
     } catch {
@@ -1333,10 +1319,9 @@ export default function CarerDashboard() {
       healthData?.steps     ?? 0,
       bjWeather?.pressure   ?? 1013,
       sleepSession?.total_hours ?? 6.5,
-      baselines,
     );
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [healthData, bjWeather, sleepSession, baselines]);
+  }, [healthData, bjWeather, sleepSession]);
 
   // ── Loading ──────────────────────────────────────────────────
 

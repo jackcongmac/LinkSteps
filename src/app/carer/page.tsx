@@ -14,6 +14,7 @@
  */
 
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
+import Link from "next/link";
 import { Play, Pause } from "lucide-react";
 import { createClient } from "@/lib/supabase";
 import type { CheckinRow } from "@/components/senior/carer/CheckinTimeline";
@@ -912,6 +913,7 @@ function SeniorIdentityTile({ name, lastMetricAt }: SeniorIdentityTileProps) {
             平安扣绑定
           </p>
           <p className="text-white text-xl font-bold">{displayName}的平安扣</p>
+          <p className="text-indigo-300/50 text-[11px] mt-1">点击查看 / 编辑信息 ›</p>
         </div>
         <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/10 border border-white/10">
           <span className={[
@@ -1277,10 +1279,7 @@ export default function CarerDashboard() {
           <ComposeMessage seniorId={seniorId} />
         </div>
 
-        {/* ③ Senior identity tile — deep indigo */}
-        <SeniorIdentityTile name={seniorName} lastMetricAt={lastMetricAt} />
-
-        {/* ④⑤ Vitals cluster — connection + sleep, tight spacing */}
+        {/* ③④ Vitals cluster — connection + sleep, tight spacing */}
         <div className="flex flex-col gap-3">
           <StatusHeader
             status={status}
@@ -1295,6 +1294,11 @@ export default function CarerDashboard() {
 
         {/* ⑥ AI wellness */}
         <WellnessCard wellness={wellness} loading={bjWeatherLoad && !healthData} />
+
+        {/* ⑥ Senior identity tile — profile entry point */}
+        <Link href="/carer/profile" className="block active:scale-[0.98] transition-transform">
+          <SeniorIdentityTile name={seniorName} lastMetricAt={lastMetricAt} />
+        </Link>
 
         {/* ⑦ Signal timeline */}
         <div className="bg-white rounded-3xl border border-slate-100 shadow-sm px-5 py-5">

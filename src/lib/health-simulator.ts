@@ -73,10 +73,7 @@ async function seedLastNight(
   }
 }
 
-/**
- * Completes an active session at 06:00 BJ.
- * Omits current_state until schema cache is refreshed.
- */
+/** Marks the night session complete — clears current_state, sets totals. */
 async function completeNightSession(
   supabase: SupabaseClient,
   seniorId: string,
@@ -85,15 +82,15 @@ async function completeNightSession(
   const { error } = await (supabase as any)
     .from("sleep_sessions")
     .update({
-      ended_at:    new Date().toISOString(),
-      total_hours: 7.0,
-      deep_hours:  2.0,
-      light_hours: 3.5,
-      rem_hours:   1.5,
+      total_hours:   7.0,
+      deep_hours:    2.0,
+      light_hours:   3.5,
+      rem_hours:     1.5,
+      current_state: null,   // clear on wake (requires schema cache refresh)
     })
     .eq("senior_id", seniorId)
-    .eq("session_date", sessionDate)
-    .is("ended_at", null);
+    .eq("session_date", sessionDate);
+  // Note: .is("ended_at", null) removed — ended_at not in PostgREST schema cache
 
   if (error) {
     console.warn("[HealthSimulator] sleep complete skipped:", error.message);
@@ -103,51 +100,99 @@ async function completeNightSession(
 }
 
 /**
- * Called on each 30s tick — upserts minimal sleep row (no current_state).
- * Once schema cache is refreshed, re-add current_state here.
+ * Called on each 30s tick — drives current_state based on Beijing time:
+ *   Night (23:00–06:00): awake 10% / deep 45% / light 45%
+ *   Nap   (12:00–15:00): nap 40% chance (skip otherwise)
+ *   Day   (other hours): resting 8% chance (skip otherwise)
+ *
+ * current_state writes require the PostgREST schema cache to be refreshed.
+ * Reload at: Supabase Dashboard → Settings → API → Reload schema cache.
  */
 async function tickSleepState(
   supabase: SupabaseClient,
   seniorId: string,
 ): Promise<void> {
   const { dateStr, hour } = getBjDate();
-  const isNight = hour >= 22 || hour < 6;
+  const isNight = hour >= 23 || hour < 6;   // 23:00–05:59 BJ
 
+  // ── Daytime ticks ─────────────────────────────────────────────
   if (!isNight) {
     if (nightSessionLive && nightSessionDate) {
       await completeNightSession(supabase, seniorId, nightSessionDate);
+      nightSessionLive = false;
+      nightSessionDate = "";
+      sleepStateIdx    = 0;
     }
-    nightSessionLive = false;
-    nightSessionDate = "";
-    sleepStateIdx    = 0;
+
+    // Nap window: 12:00–14:59 BJ
+    if (hour >= 12 && hour < 15 && Math.random() < 0.40) {
+      const { error } = await (supabase as any)
+        .from("sleep_sessions")
+        .update({ current_state: "nap" })
+        .eq("senior_id", seniorId)
+        .order("session_date", { ascending: false })
+        .limit(1);
+      if (error) {
+        console.warn("[HealthSimulator] nap state skipped:", error.message);
+      } else {
+        console.log("[HealthSimulator] ✓ nap state written");
+      }
+    }
+
+    // Occasional daytime resting (8% chance)
+    if ((hour < 12 || hour >= 15) && Math.random() < 0.08) {
+      const { error } = await (supabase as any)
+        .from("sleep_sessions")
+        .update({ current_state: "resting" })
+        .eq("senior_id", seniorId)
+        .order("session_date", { ascending: false })
+        .limit(1);
+      if (error) {
+        console.warn("[HealthSimulator] resting state skipped:", error.message);
+      } else {
+        console.log("[HealthSimulator] ✓ resting state written");
+      }
+    }
     return;
   }
 
-  const anchorDate = hour >= 22 ? dateStr : getYesterdayBj();
+  // ── Night ticks ───────────────────────────────────────────────
+  const anchorDate = hour >= 23 ? dateStr : getYesterdayBj();
   sleepStateIdx++;
 
+  // Step 1: ensure session row exists (safe columns only)
   if (!nightSessionLive) {
     const { error } = await (supabase as any)
       .from("sleep_sessions")
       .upsert(
-        {
-          senior_id:    seniorId,
-          session_date: anchorDate,
-          started_at:   new Date().toISOString(),
-          // current_state omitted — schema cache doesn't see it yet
-        },
+        { senior_id: seniorId, session_date: anchorDate },
         { onConflict: "senior_id,session_date" },
       );
-
     if (error) {
       console.warn("[HealthSimulator] sleep tick (start) skipped:", error.message);
-    } else {
-      nightSessionLive = true;
-      nightSessionDate = anchorDate;
-      console.log(`[HealthSimulator] ✓ sleep session started (date=${anchorDate})`);
+      return;
     }
+    nightSessionLive = true;
+    nightSessionDate = anchorDate;
+    console.log(`[HealthSimulator] ✓ night session created (date=${anchorDate})`);
   }
-  // Subsequent ticks: skip current_state update until schema cache is refreshed
+
+  // Step 2: update current_state (requires schema cache refresh)
+  const rand = Math.random();
+  const nightState: 'awake' | 'deep' | 'light' =
+    rand < 0.10 ? 'awake' : rand < 0.55 ? 'deep' : 'light';
+
+  const { error: stateErr } = await (supabase as any)
+    .from("sleep_sessions")
+    .update({ current_state: nightState })
+    .eq("senior_id", seniorId)
+    .eq("session_date", nightSessionDate);
+
+  if (stateErr) {
+    console.warn("[HealthSimulator] current_state update skipped:", stateErr.message);
+  } else {
+    console.log(`[HealthSimulator] ✓ night state: ${nightState}`);
+  }
 }
 
 // ── Main simulator ────────────────────────────────────────────

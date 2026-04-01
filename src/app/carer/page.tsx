@@ -72,6 +72,12 @@ function getBjClock(): { time: string; period: string } {
   return { time: `${hh}:${mm}`, period };
 }
 
+/** Current Beijing hour (0–23) */
+function getBjHour(): number {
+  const bj = new Date().toLocaleString("en-US", { timeZone: "Asia/Shanghai" });
+  return new Date(bj).getHours();
+}
+
 /** Jack's local time string */
 function getLocalClock(): string {
   const d  = new Date();
@@ -122,14 +128,16 @@ interface HealthData {
   steps:     number;
 }
 
+type SleepCurrentState = 'awake' | 'deep' | 'light' | 'nap' | 'resting' | null;
+
 interface SleepSession {
-  id:           string;
-  session_date: string;
-  total_hours:  number | null;
-  deep_hours:   number | null;
-  light_hours:  number | null;
-  rem_hours:    number | null;
-  // started_at / ended_at / current_state omitted until schema cache refreshed
+  id:            string;
+  session_date:  string;
+  total_hours:   number | null;
+  deep_hours:    number | null;
+  light_hours:   number | null;
+  rem_hours:     number | null;
+  current_state: SleepCurrentState;
 }
 
 // ── Status derivation ─────────────────────────────────────────
@@ -498,41 +506,6 @@ function StatusHeader({ status, pulse, onPulseEnd, onDismiss, healthData, lastMe
 
 // ── SleepInsightsCard helpers ─────────────────────────────────
 
-function SleepStateChip({ state }: { state: 'awake' | 'light' | 'deep' | null }) {
-  if (!state) return <span className="text-slate-500 text-sm">--</span>;
-
-  const config: Record<
-    'awake' | 'light' | 'deep',
-    { label: string; cls: string; animate: boolean }
-  > = {
-    deep:  {
-      label: '正在深睡',
-      cls:   'bg-indigo-500/40 text-indigo-200 ring-1 ring-indigo-400/50',
-      animate: true,
-    },
-    light: {
-      label: '浅睡中',
-      cls:   'bg-sky-500/30 text-sky-200',
-      animate: false,
-    },
-    awake: {
-      label: '尚未入睡',
-      cls:   'bg-slate-700 text-slate-400',
-      animate: false,
-    },
-  };
-
-  const c = config[state];
-  return (
-    <span
-      className={["px-4 py-2 rounded-full text-base font-medium", c.cls].join(" ")}
-      style={c.animate ? { animation: 'sleepBreathe 4s ease-in-out infinite' } : undefined}
-    >
-      {c.label}
-    </span>
-  );
-}
-
 function SleepBreakdownBar({ session }: { session: SleepSession }) {
   const deep  = session.deep_hours  ?? 0;
   const light = session.light_hours ?? 0;
@@ -568,18 +541,124 @@ interface SleepInsightsCardProps {
   session: SleepSession | null;
 }
 
-function SleepInsightsCard({ session }: SleepInsightsCardProps) {
-  const isMorningSummary = session !== null && session.total_hours !== null;
-  const isNightWatch     = session !== null && session.total_hours === null;
+/** Night-mode status panel (23:00–06:00 BJ) */
+function NightStatusPanel({
+  cs, isAwakeAlert, awakeMinutes,
+}: {
+  cs:            SleepCurrentState;
+  isAwakeAlert:  boolean;
+  awakeMinutes:  number;
+}) {
+  const panelCls =
+    cs === 'awake'
+      ? isAwakeAlert
+        ? 'bg-amber-500/20 border border-amber-400/40'
+        : 'bg-yellow-500/10 border border-yellow-400/20'
+      : cs === 'deep'  ? 'bg-indigo-500/20 border border-indigo-400/30'
+      : cs === 'light' ? 'bg-sky-500/15    border border-sky-400/30'
+                       : 'bg-slate-700/40  border border-slate-600/40';
 
-  const deepWarn = isMorningSummary && (session.deep_hours ?? 0) < 1.5;
+  const icon  = cs === 'awake' ? (isAwakeAlert ? '⚠️' : '😐')
+              : cs === 'deep'  ? '💤'
+              : cs === 'light' ? '🌙' : '📡';
+
+  const label = cs === 'awake' ? '尚未入睡'
+              : cs === 'deep'  ? '深睡中'
+              : cs === 'light' ? '浅睡中' : '无睡眠信号';
+
+  const labelCls = cs === 'awake' ? (isAwakeAlert ? 'text-amber-200' : 'text-yellow-200')
+                 : cs === 'deep'  ? 'text-indigo-200'
+                 : cs === 'light' ? 'text-sky-200' : 'text-slate-400';
+
+  const sub = cs === 'awake'
+    ? (isAwakeAlert ? `已持续未眠 ${awakeMinutes} 分钟，建议联系确认` : '老人此时尚未入睡，请留意')
+    : cs === 'deep'  ? '正处于深度睡眠，勿打扰'
+    : cs === 'light' ? '浅度睡眠中'
+    : '平安扣设备暂无数据';
+
+  const subCls = cs === 'awake' ? (isAwakeAlert ? 'text-amber-300' : 'text-yellow-300/70')
+               : cs === 'deep'  ? 'text-indigo-300/70'
+               : cs === 'light' ? 'text-sky-300/70' : 'text-slate-500';
+
+  return (
+    <div className={`rounded-2xl px-4 py-4 flex flex-col items-center gap-3 ${panelCls}`}>
+      <span className={`text-5xl ${cs === 'deep' ? 'animate-[breathe_4s_ease-in-out_infinite]' : ''}`}>
+        {icon}
+      </span>
+      <p className={`text-xl font-bold ${labelCls}`}>{label}</p>
+      <p className={`text-xs text-center leading-relaxed ${subCls}`}>{sub}</p>
+      {isAwakeAlert && (
+        <div className="w-full flex items-center justify-center px-3 py-2 rounded-xl bg-amber-500/25 border border-amber-400/40">
+          <span className="text-amber-300 text-xs font-semibold">已持续未眠 {awakeMinutes} 分钟</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SleepInsightsCard({ session }: SleepInsightsCardProps) {
+  // ── Beijing time period ───────────────────────────────────────
+  const [bjHour, setBjHour] = useState(getBjHour);
+  useEffect(() => {
+    const id = setInterval(() => setBjHour(getBjHour()), 60_000);
+    return () => clearInterval(id);
+  }, []);
+
+  // night: 23:00–05:59 | nap: 12:00–14:59 | day: everything else
+  const period: 'night' | 'nap' | 'day' =
+    bjHour >= 23 || bjHour < 6  ? 'night' :
+    bjHour >= 12 && bjHour < 15 ? 'nap'   : 'day';
+
+  const cs = session?.current_state ?? null;
+
+  // ── Awake duration tracker (night only) ──────────────────────
+  const awakeSinceRef = useRef<number | null>(null);
+  const [awakeMinutes, setAwakeMinutes] = useState(0);
+  useEffect(() => {
+    if (period === 'night' && cs === 'awake') {
+      if (!awakeSinceRef.current) awakeSinceRef.current = Date.now();
+      const id = setInterval(() => {
+        setAwakeMinutes(Math.floor((Date.now() - awakeSinceRef.current!) / 60_000));
+      }, 15_000);
+      return () => clearInterval(id);
+    }
+    awakeSinceRef.current = null;
+    setAwakeMinutes(0);
+  }, [period, cs]);
+
+  // ── Display mode ──────────────────────────────────────────────
+  const isAwakeAlert   = period === 'night' && cs === 'awake' && awakeMinutes >= 30;
+  const isNapping      = period === 'nap'   && cs === 'nap';
+  const isResting      = cs === 'resting';
+  const isMorningSummary = !isNapping && !isResting && period !== 'night'
+                           && session !== null && session.total_hours !== null;
+  const deepWarn = isMorningSummary && (session!.deep_hours ?? 0) < 1.5;
+
+  const headerLabel =
+    period === 'night' ? '夜间监测' :
+    isNapping          ? '午间休憩' :
+    isResting          ? '静息中'   : '昨晚睡眠';
+
+  const headerBadge: { text: string; cls: string } | null =
+    period === 'night' && !isAwakeAlert
+      ? { text: '实时睡眠状态', cls: 'border-indigo-400/50 text-indigo-200' }
+    : isAwakeAlert
+      ? { text: '⚠ 需要留意',   cls: 'border-amber-400/60 text-amber-200 bg-amber-500/10' }
+    : isNapping
+      ? { text: '午休中',        cls: 'border-orange-400/50 text-orange-200' }
+    : isResting
+      ? { text: '安静休息',      cls: 'border-emerald-400/50 text-emerald-200' }
+    : null;
 
   return (
     <div
-      className="rounded-3xl shadow-lg px-5 py-5 flex flex-col gap-4 relative overflow-hidden"
+      className={[
+        "rounded-3xl shadow-lg px-5 py-5 flex flex-col gap-4 relative overflow-hidden transition-all duration-700",
+        isAwakeAlert ? "ring-2 ring-amber-400/60" : "",
+      ].join(" ")}
       style={{ background: 'linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%)' }}
     >
-      {/* Stars decoration */}
+      {/* Stars */}
       <span className="absolute top-3 right-6  w-1   h-1   rounded-full bg-white opacity-70" />
       <span className="absolute top-6 right-12 w-0.5 h-0.5 rounded-full bg-white opacity-40" />
       <span className="absolute top-4 right-20 w-1   h-1   rounded-full bg-white opacity-50" />
@@ -588,46 +667,58 @@ function SleepInsightsCard({ session }: SleepInsightsCardProps) {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <span className="text-xl">🌙</span>
-          <p className="text-white font-semibold text-base">
-            {isNightWatch ? '夜间监测' : '昨晚睡眠'}
-          </p>
+          <span className="text-xl">
+            {period === 'night' ? '🌙' : isNapping ? '☀️' : isResting ? '🌿' : '🌙'}
+          </span>
+          <p className="text-white font-semibold text-base">{headerLabel}</p>
         </div>
-        {isNightWatch && (
-          <span className="text-[11px] font-medium px-2.5 py-1 rounded-full border border-indigo-400/50 text-indigo-200">
-            实时睡眠状态
+        {headerBadge && (
+          <span className={`text-[11px] font-medium px-2.5 py-1 rounded-full border ${headerBadge.cls}`}>
+            {headerBadge.text}
           </span>
         )}
       </div>
 
       {/* Body */}
-      {!session ? (
+      {period === 'night' ? (
+        <NightStatusPanel cs={cs} isAwakeAlert={isAwakeAlert} awakeMinutes={awakeMinutes} />
+      ) : isNapping ? (
+        /* ── Nap mode (12–15 BJ, warm orange) ── */
+        <div className="rounded-2xl px-4 py-4 flex flex-col items-center gap-3 bg-orange-500/15 border border-orange-400/30">
+          <span className="text-5xl">☀️</span>
+          <p className="text-xl font-bold text-orange-200">午间休憩中</p>
+          <p className="text-xs text-orange-300/70">正在午休，请勿打扰</p>
+        </div>
+      ) : isResting ? (
+        /* ── Resting mode (sage green) ── */
+        <div className="rounded-2xl px-4 py-4 flex flex-col items-center gap-3 bg-emerald-500/10 border border-emerald-400/20">
+          <span className="text-5xl">🌿</span>
+          <p className="text-xl font-bold text-emerald-200">正在静息</p>
+          <p className="text-xs text-emerald-300/70">处于安静休息状态</p>
+        </div>
+      ) : !session ? (
+        /* ── Loading skeleton ── */
         <div className="flex flex-col gap-3 py-1">
-          {/* Sync skeleton */}
           <div className="flex items-center gap-2">
             <span className="w-3 h-3 rounded-full border-2 border-indigo-400/40 border-t-indigo-300 animate-spin flex-shrink-0" />
             <span className="text-slate-400 text-sm">正在同步睡眠数据…</span>
           </div>
-          {/* Skeleton bars */}
           <div className="flex h-2 rounded-full overflow-hidden bg-slate-700/60 animate-pulse" />
           <div className="flex gap-2 text-[11px] text-slate-600">
-            <span>深睡 --</span>
-            <span>·</span>
-            <span>浅睡 --</span>
-            <span>·</span>
-            <span>REM --</span>
+            <span>深睡 --</span><span>·</span><span>浅睡 --</span><span>·</span><span>REM --</span>
           </div>
         </div>
-      ) : isNightWatch ? (
+      ) : !isMorningSummary ? (
+        /* ── Night watch day-mode (no total_hours yet) ── */
         <div className="flex flex-col items-center gap-3 py-2">
-          {/* current_state not available until schema cache is refreshed — show neutral chip */}
           <span className="px-4 py-2 rounded-full text-base font-medium bg-indigo-500/30 text-indigo-200">
             监测中…
           </span>
         </div>
       ) : (
+        /* ── Morning summary ── */
         <div className="flex flex-col gap-3">
-          <p className={["text-2xl font-bold", deepWarn ? "text-amber-300" : "text-white"].join(" ")}>
+          <p className={`text-2xl font-bold ${deepWarn ? "text-amber-300" : "text-white"}`}>
             昨晚总睡眠: {session.total_hours?.toFixed(1)}小时
             {deepWarn && <span className="ml-2 text-sm font-normal text-amber-400">深睡不足</span>}
           </p>
@@ -914,12 +1005,12 @@ export default function CarerDashboard() {
       }
 
       // ── Query most recent sleep session ─────────────────────────
-      // No date filter — just ORDER + LIMIT so timezone gaps don't
-      // hide rows written by the simulator on a different clock.
+      // select("*") — PostgREST returns all cached columns; current_state
+      // appears once the schema cache is refreshed (no date filter).
       console.log("[carer] querying sleep_sessions for senior_id:", id);
-      const { data: sleepRows, error: sleepError } = await supabase
+      const { data: sleepRows, error: sleepError } = await (supabase as any)
         .from("sleep_sessions")
-        .select("id, session_date, total_hours, deep_hours, light_hours, rem_hours")
+        .select("*")
         .eq("senior_id", id)
         .order("session_date", { ascending: false })
         .limit(1);
@@ -934,12 +1025,13 @@ export default function CarerDashboard() {
         // DB row missing (seed failed or RLS blocked) — use static fallback so the UI is verifiable
         console.warn("[carer] sleep query returned 0 rows — using static fallback");
         setSleepSession({
-          id:           "fallback",
-          session_date: yesterdayStr,
-          total_hours:  7.0,
-          deep_hours:   2.0,
-          light_hours:  3.5,
-          rem_hours:    1.5,
+          id:            "fallback",
+          session_date:  yesterdayStr,
+          total_hours:   7.0,
+          deep_hours:    2.0,
+          light_hours:   3.5,
+          rem_hours:     1.5,
+          current_state: null,
         });
       }
     } else {

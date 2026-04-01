@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { ArrowLeft, QrCode, CheckCircle2 } from "lucide-react";
 import { createClient } from "@/lib/supabase";
 
-// ── Relationship → Gender auto-fill ───────────────────────────
+// ── Types ─────────────────────────────────────────────────────
 
 type Relationship = "父亲" | "母亲" | "公公" | "婆婆" | "其他";
 type Gender = "男" | "女" | "";
@@ -13,12 +13,24 @@ type Gender = "男" | "女" | "";
 const RELATIONSHIP_OPTIONS: Relationship[] = ["父亲", "母亲", "公公", "婆婆", "其他"];
 
 const RELATIONSHIP_GENDER: Record<Relationship, Gender> = {
-  父亲: "男",
-  公公: "男",
-  母亲: "女",
-  婆婆: "女",
-  其他: "",
+  父亲: "男", 公公: "男", 母亲: "女", 婆婆: "女", 其他: "",
 };
+
+// localStorage keys for fields not yet in the DB schema
+const LS = {
+  age:          "lsp_age",
+  gender:       "lsp_gender",
+  relationship: "lsp_relationship",
+  custom:       "lsp_custom_relation",
+};
+
+interface Snapshot {
+  name:           string;
+  age:            string;
+  gender:         Gender;
+  relationship:   Relationship | "";
+  customRelation: string;
+}
 
 // ── Page ──────────────────────────────────────────────────────
 
@@ -26,42 +38,70 @@ export default function SeniorProfilePage() {
   const router   = useRouter();
   const supabase = useMemo(() => createClient(), []);
 
-  const [seniorId,      setSeniorId]      = useState<string | null>(null);
-  const [name,          setName]          = useState("");
-  const [age,           setAge]           = useState("");
-  const [gender,        setGender]        = useState<Gender>("");
-  const [relationship,  setRelationship]  = useState<Relationship | "">("");
-  const [customRelation,setCustomRelation]= useState("");
-  const [loading,       setLoading]       = useState(true);
-  const [saving,        setSaving]        = useState(false);
-  const [toast,         setToast]         = useState<string | null>(null);
+  const [seniorId,       setSeniorId]       = useState<string | null>(null);
+  const [name,           setName]           = useState("");
+  const [age,            setAge]            = useState("");
+  const [gender,         setGender]         = useState<Gender>("");
+  const [relationship,   setRelationship]   = useState<Relationship | "">("");
+  const [customRelation, setCustomRelation] = useState("");
+  const [saved,          setSaved]          = useState<Snapshot | null>(null);
+  const [loading,        setLoading]        = useState(true);
+  const [saving,         setSaving]         = useState(false);
+  const [toast,          setToast]          = useState<string | null>(null);
+  const [showDiscard,    setShowDiscard]    = useState(false);
 
-  // Load existing senior profile
+  // ── Load from DB + localStorage ───────────────────────────────
   useEffect(() => {
     supabase
       .from("senior_profiles")
       .select("id, name")
       .limit(1)
       .then(({ data }) => {
-        const row = (data as { id: string; name: string }[] | null)?.[0];
-        if (row) {
-          setSeniorId(row.id);
-          setName(row.name);
-        }
+        const row    = (data as { id: string; name: string }[] | null)?.[0];
+        const dbName = row?.name ?? "";
+        if (row) setSeniorId(row.id);
+
+        const storedAge    = localStorage.getItem(LS.age)          ?? "";
+        const storedGender = (localStorage.getItem(LS.gender)      ?? "") as Gender;
+        const storedRel    = (localStorage.getItem(LS.relationship) ?? "") as Relationship | "";
+        const storedCustom = localStorage.getItem(LS.custom)       ?? "";
+
+        setName(dbName);
+        setAge(storedAge);
+        setGender(storedGender);
+        setRelationship(storedRel);
+        setCustomRelation(storedCustom);
+
+        setSaved({
+          name:           dbName,
+          age:            storedAge,
+          gender:         storedGender,
+          relationship:   storedRel,
+          customRelation: storedCustom,
+        });
+
         setLoading(false);
       });
   }, [supabase]);
 
-  // Auto-fill gender when relationship changes
+  // ── Dirty check ───────────────────────────────────────────────
+  const isDirty = saved !== null && (
+    name           !== saved.name           ||
+    age            !== saved.age            ||
+    gender         !== saved.gender         ||
+    relationship   !== saved.relationship   ||
+    customRelation !== saved.customRelation
+  );
+
+  // ── Handlers ──────────────────────────────────────────────────
   function handleRelationshipChange(rel: Relationship) {
     setRelationship(rel);
-    const autoGender = RELATIONSHIP_GENDER[rel];
-    if (autoGender) setGender(autoGender);
-    else setGender("");
+    const auto = RELATIONSHIP_GENDER[rel];
+    setGender(auto || "");
   }
 
   async function handleSave() {
-    if (!name.trim() || !seniorId) return;
+    if (!name.trim() || !seniorId || !isDirty) return;
     setSaving(true);
 
     const { error } = await supabase
@@ -69,16 +109,31 @@ export default function SeniorProfilePage() {
       .update({ name: name.trim() })
       .eq("id", seniorId);
 
-    setSaving(false);
-    if (error) {
-      setToast("保存失败，请重试");
-    } else {
+    if (!error) {
+      localStorage.setItem(LS.age,          age);
+      localStorage.setItem(LS.gender,       gender);
+      localStorage.setItem(LS.relationship, relationship);
+      localStorage.setItem(LS.custom,       customRelation);
+
+      setSaved({ name: name.trim(), age, gender, relationship, customRelation });
       setToast("已保存");
+    } else {
+      setToast("保存失败，请重试");
     }
+
+    setSaving(false);
     setTimeout(() => setToast(null), 2500);
   }
 
-  // ── Loading ────────────────────────────────────────────────
+  function handleBack() {
+    if (isDirty) {
+      setShowDiscard(true);
+    } else {
+      router.back();
+    }
+  }
+
+  // ── Loading ───────────────────────────────────────────────────
   if (loading) {
     return (
       <main className="min-h-screen bg-slate-50 flex items-center justify-center">
@@ -87,7 +142,7 @@ export default function SeniorProfilePage() {
     );
   }
 
-  // ── Main ──────────────────────────────────────────────────
+  // ── Main ──────────────────────────────────────────────────────
   return (
     <main className="min-h-screen bg-slate-50 flex flex-col items-center px-4 py-8 pb-24">
       <div className="w-full max-w-sm flex flex-col gap-5">
@@ -96,13 +151,16 @@ export default function SeniorProfilePage() {
         <div className="flex items-center gap-3">
           <button
             type="button"
-            onClick={() => router.back()}
+            onClick={handleBack}
             className="flex h-9 w-9 items-center justify-center rounded-full bg-white shadow-sm active:scale-95 transition-transform"
             aria-label="返回"
           >
             <ArrowLeft className="h-4 w-4 text-slate-600" />
           </button>
           <h1 className="text-lg font-semibold text-slate-800">长辈信息</h1>
+          {isDirty && (
+            <span className="ml-auto text-xs text-amber-500 font-medium">未保存</span>
+          )}
         </div>
 
         {/* Profile card */}
@@ -169,7 +227,7 @@ export default function SeniorProfilePage() {
               </div>
             </div>
 
-            {/* 其他：自定义关系文本框 */}
+            {/* 其他：自定义关系 */}
             {relationship === "其他" && (
               <div className="space-y-1.5">
                 <label htmlFor="custom-relation" className="block text-sm font-medium text-slate-700">
@@ -186,7 +244,7 @@ export default function SeniorProfilePage() {
               </div>
             )}
 
-            {/* 性别 — auto-filled for known relationships; manual for 其他 */}
+            {/* 性别 */}
             <div className="space-y-1.5">
               <label className="block text-sm font-medium text-slate-700">性别</label>
               <div className="flex gap-2">
@@ -216,13 +274,18 @@ export default function SeniorProfilePage() {
             </div>
           </div>
 
-          {/* Save */}
+          {/* Save button — gray when clean, sky-500 when dirty */}
           <div className="px-5 pb-5">
             <button
               type="button"
               onClick={handleSave}
-              disabled={saving || !name.trim()}
-              className="w-full rounded-2xl bg-sky-500 py-3.5 text-sm font-semibold text-white shadow-sm active:scale-95 transition-transform disabled:opacity-40 disabled:cursor-not-allowed"
+              disabled={saving || !name.trim() || !isDirty}
+              className={[
+                "w-full rounded-2xl py-3.5 text-sm font-semibold text-white transition-all active:scale-95",
+                isDirty && name.trim()
+                  ? "bg-sky-500 shadow-sm"
+                  : "bg-slate-200 cursor-not-allowed",
+              ].join(" ")}
             >
               {saving ? "保存中…" : "保存"}
             </button>
@@ -241,7 +304,7 @@ export default function SeniorProfilePage() {
           </div>
         )}
 
-        {/* 平安扣邀请二维码 */}
+        {/* QR section */}
         <section className="rounded-3xl bg-white shadow-sm px-5 py-6">
           <div className="flex flex-col items-center gap-4">
             <div className="w-20 h-20 rounded-3xl bg-indigo-50 flex items-center justify-center">
@@ -255,9 +318,7 @@ export default function SeniorProfilePage() {
             </div>
             <button
               type="button"
-              onClick={() => {
-                setToast("邀请二维码功能即将上线 🔜");
-              }}
+              onClick={() => setToast("邀请二维码功能即将上线 🔜")}
               className="w-full rounded-2xl bg-indigo-500 py-4 text-sm font-semibold text-white shadow-md shadow-indigo-100 active:scale-95 transition-transform flex items-center justify-center gap-2"
             >
               <QrCode className="w-4 h-4" />
@@ -267,6 +328,40 @@ export default function SeniorProfilePage() {
         </section>
 
       </div>
+
+      {/* Discard confirmation modal */}
+      {showDiscard && (
+        <div
+          className="fixed inset-0 bg-black/40 flex items-end justify-center z-50"
+          onClick={() => setShowDiscard(false)}
+        >
+          <div
+            className="w-full max-w-sm mx-4 mb-10 rounded-3xl bg-white shadow-xl px-6 py-6 flex flex-col gap-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="text-slate-800 font-semibold text-base">放弃未保存的更改？</p>
+            <p className="text-slate-400 text-sm leading-relaxed">
+              您的修改尚未保存，离开后将丢失。
+            </p>
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={() => setShowDiscard(false)}
+                className="flex-1 rounded-2xl border border-slate-200 py-3 text-sm font-semibold text-slate-600 active:scale-95 transition-transform"
+              >
+                继续编辑
+              </button>
+              <button
+                type="button"
+                onClick={() => router.back()}
+                className="flex-1 rounded-2xl bg-red-500 py-3 text-sm font-semibold text-white active:scale-95 transition-transform"
+              >
+                放弃保存
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

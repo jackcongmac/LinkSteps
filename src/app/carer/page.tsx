@@ -20,8 +20,8 @@ import { createClient } from "@/lib/supabase";
 import type { CheckinRow } from "@/components/senior/carer/CheckinTimeline";
 import type { RealtimePostgresInsertPayload, RealtimePostgresUpdatePayload } from "@supabase/supabase-js";
 import type { WeatherPayload } from "@/app/api/weather/route";
-import { calculateSeniorWellness } from "@/lib/wellness-score";
 import type { WellnessResult } from "@/lib/wellness-score";
+import { calculateSeniorWellness } from "@/lib/wellness-score";
 import ComposeMessage from "@/components/senior/carer/ComposeMessage";
 import FamilyTimeline from "@/components/senior/carer/FamilyTimeline";
 import type { MessageRow } from "@/types/messages";
@@ -783,7 +783,7 @@ function WellnessCard({ wellness, loading }: WellnessCardProps) {
       {loading || !wellness ? (
         <div className="flex items-center gap-3">
           <div className="w-5 h-5 rounded-full border-2 border-indigo-200 border-t-indigo-500 animate-spin" />
-          <p className="text-slate-400 text-sm">正在分析健康数据…</p>
+          <p className="text-slate-400 text-sm animate-pulse">AI 分析中…</p>
         </div>
       ) : (
         <div className="flex items-center gap-4">
@@ -815,7 +815,7 @@ function WellnessCard({ wellness, loading }: WellnessCardProps) {
       )}
 
       <p className="text-[10px] text-slate-300 text-right -mt-1">
-        基于北京气压 · 心率 · 步数 · 睡眠
+        基于北京气压 · 5分钟均值心率 · 步数 · 睡眠 · 7天基线
       </p>
     </div>
   );
@@ -962,6 +962,15 @@ export default function CarerDashboard() {
   const [bjWeatherLoad,setBjWeatherLoad]= useState(true);
   const [, setClockTick] = useState(0);   // triggers re-render for live clocks
 
+  // ── AI Wellness state ─────────────────────────────────────────
+  type HrReading = { value: number; measured_at: string };
+  type Baselines = { avg_steps: number | null; avg_resting_hr: number | null; avg_sleep_hours: number | null } | null;
+  const [hrReadings,     setHrReadings]     = useState<HrReading[]>([]);
+  const [baselines,      setBaselines]      = useState<Baselines>(null);
+  const [wellnessInsight,setWellnessInsight]= useState<WellnessResult | null>(null);
+  const [wellnessLoading,setWellnessLoading]= useState(true);
+  const lastWellnessFetch = useRef<number>(0);
+
 
   // ── 1. Load senior + checkins ────────────────────────────────
   const loadData = useCallback(async () => {
@@ -1022,7 +1031,7 @@ export default function CarerDashboard() {
         .eq("senior_id", id)
         .in("metric_type", ["heart_rate", "steps"])
         .order("measured_at", { ascending: false })
-        .limit(10);
+        .limit(30);
 
       if (healthRows) {
         type HealthRowRaw = { metric_type: string; value: number; measured_at: string };
@@ -1035,11 +1044,30 @@ export default function CarerDashboard() {
             steps:     stepsRow?.value ?? 0,
           });
         }
+        // Seed initial HR window (last 5 minutes of readings)
+        const cutoff5m = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+        const recentHr = rows
+          .filter((r) => r.metric_type === "heart_rate" && r.measured_at >= cutoff5m)
+          .map((r) => ({ value: r.value, measured_at: r.measured_at }));
+        if (recentHr.length > 0) setHrReadings(recentHr);
+
         // Track most recent metric time for watchdog
         if (rows.length > 0) {
           const newest = rows.reduce((a, b) => a.measured_at > b.measured_at ? a : b);
           setLastMetricAt(newest.measured_at);
         }
+      }
+
+      // Fetch 7-day baselines for relative health scoring
+      const { data: baselineRow } = await supabase
+        .from("senior_baselines")
+        .select("avg_steps, avg_resting_hr, avg_sleep_hours")
+        .eq("senior_id", id)
+        .maybeSingle();
+
+      if (baselineRow) {
+        const b = baselineRow as { avg_steps: number | null; avg_resting_hr: number | null; avg_sleep_hours: number | null };
+        setBaselines({ avg_steps: b.avg_steps, avg_resting_hr: b.avg_resting_hr, avg_sleep_hours: b.avg_sleep_hours });
       }
 
       // ── Demo seed: upsert last night's sleep with requested values ────
@@ -1177,6 +1205,13 @@ export default function CarerDashboard() {
             if (row.metric_type === "steps")      return { ...base, steps:     row.value };
             return base;
           });
+          // Maintain 5-minute HR sliding window for smoothing
+          if (row.metric_type === "heart_rate" && row.measured_at) {
+            setHrReadings((prev) => {
+              const cutoff = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+              return [...prev.filter((r) => r.measured_at >= cutoff), { value: row.value, measured_at: row.measured_at }];
+            });
+          }
           // Update watchdog timestamp on every incoming metric
           if (row.measured_at) setLastMetricAt(row.measured_at);
         },
@@ -1246,6 +1281,63 @@ export default function CarerDashboard() {
     });
   }, [seniorId, supabase]);
 
+  // ── AI Wellness Insight — throttled fetch ─────────────────────
+  const fetchWellnessInsight = useCallback(async (
+    smoothedHr: number,
+    steps:      number,
+    pressure:   number,
+    sleep:      number,
+    bls:        Baselines,
+  ) => {
+    const now = Date.now();
+    // Throttle: max one AI call per 5 minutes
+    if (now - lastWellnessFetch.current < 5 * 60 * 1000) return;
+    lastWellnessFetch.current = now;
+
+    setWellnessLoading(true);
+    try {
+      const res = await fetch("/api/senior/wellness-insight", {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          metrics:   { pressure, sleep, steps, heartRate: smoothedHr },
+          baselines: bls,
+        }),
+      });
+      if (res.ok) {
+        const insight = await res.json() as WellnessResult;
+        setWellnessInsight(insight);
+      } else {
+        // Fallback: compute locally
+        setWellnessInsight(calculateSeniorWellness({ pressure, sleep, steps, heartRate: smoothedHr }));
+      }
+    } catch {
+      setWellnessInsight(calculateSeniorWellness({ pressure, sleep, steps, heartRate: smoothedHr }));
+    } finally {
+      setWellnessLoading(false);
+    }
+  }, []);
+
+  // Trigger wellness insight when inputs first become available
+  useEffect(() => {
+    if (!bjWeather && !healthData) return;
+
+    const cutoff = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+    const recentHr = hrReadings.filter((r) => r.measured_at >= cutoff);
+    const smoothedHr = recentHr.length > 0
+      ? Math.round(recentHr.reduce((sum, r) => sum + r.value, 0) / recentHr.length)
+      : (healthData?.heartRate ?? 75);
+
+    fetchWellnessInsight(
+      smoothedHr,
+      healthData?.steps     ?? 0,
+      bjWeather?.pressure   ?? 1013,
+      sleepSession?.total_hours ?? 6.5,
+      baselines,
+    );
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [healthData, bjWeather, sleepSession, baselines]);
+
   // ── Loading ──────────────────────────────────────────────────
 
   if (loading) {
@@ -1257,14 +1349,6 @@ export default function CarerDashboard() {
   }
 
   const status = deriveStatus(feed, dismissedId, seniorName);
-
-  // Wellness score — recomputes whenever health or weather updates
-  const wellness: WellnessResult | null = (healthData || bjWeather) ? calculateSeniorWellness({
-    pressure:  bjWeather?.pressure,
-    steps:     healthData?.steps,
-    heartRate: healthData?.heartRate,
-    sleep:     sleepSession?.total_hours ?? 6.5,   // falls back to 6.5h if no sleep_session row exists yet
-  }) : null;
 
   // ── Main ─────────────────────────────────────────────────────
 
@@ -1303,7 +1387,7 @@ export default function CarerDashboard() {
         </div>
 
         {/* ⑥ AI wellness */}
-        <WellnessCard wellness={wellness} loading={bjWeatherLoad && !healthData} />
+        <WellnessCard wellness={wellnessInsight} loading={wellnessLoading} />
 
         {/* ⑥ Senior identity tile — profile entry point */}
         <Link href="/carer/profile" className="block active:scale-[0.98] transition-transform">

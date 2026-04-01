@@ -16,14 +16,6 @@ const RELATIONSHIP_GENDER: Record<Relationship, Gender> = {
   父亲: "男", 公公: "男", 母亲: "女", 婆婆: "女", 其他: "",
 };
 
-// localStorage keys for fields not yet in the DB schema
-const LS = {
-  age:          "lsp_age",
-  gender:       "lsp_gender",
-  relationship: "lsp_relationship",
-  custom:       "lsp_custom_relation",
-};
-
 interface Snapshot {
   name:           string;
   age:            string;
@@ -50,34 +42,38 @@ export default function SeniorProfilePage() {
   const [toast,          setToast]          = useState<string | null>(null);
   const [showDiscard,    setShowDiscard]    = useState(false);
 
-  // ── Load from DB + localStorage ───────────────────────────────
+  // ── Load from DB ──────────────────────────────────────────────
   useEffect(() => {
     supabase
       .from("senior_profiles")
-      .select("id, name")
+      .select("id, name, age, gender, relationship, custom_relation")
       .limit(1)
       .then(({ data }) => {
-        const row    = (data as { id: string; name: string }[] | null)?.[0];
-        const dbName = row?.name ?? "";
+        const row = (data as {
+          id: string; name: string; age: number | null;
+          gender: Gender | null; relationship: string | null;
+          custom_relation: string | null;
+        }[] | null)?.[0];
+
+        const dbName   = row?.name            ?? "";
+        const dbAge    = row?.age != null      ? String(row.age) : "";
+        const dbGender = (row?.gender         ?? "") as Gender;
+        const dbRel    = (row?.relationship   ?? "") as Relationship | "";
+        const dbCustom = row?.custom_relation ?? "";
+
         if (row) setSeniorId(row.id);
-
-        const storedAge    = localStorage.getItem(LS.age)          ?? "";
-        const storedGender = (localStorage.getItem(LS.gender)      ?? "") as Gender;
-        const storedRel    = (localStorage.getItem(LS.relationship) ?? "") as Relationship | "";
-        const storedCustom = localStorage.getItem(LS.custom)       ?? "";
-
         setName(dbName);
-        setAge(storedAge);
-        setGender(storedGender);
-        setRelationship(storedRel);
-        setCustomRelation(storedCustom);
+        setAge(dbAge);
+        setGender(dbGender);
+        setRelationship(dbRel);
+        setCustomRelation(dbCustom);
 
         setSaved({
           name:           dbName,
-          age:            storedAge,
-          gender:         storedGender,
-          relationship:   storedRel,
-          customRelation: storedCustom,
+          age:            dbAge,
+          gender:         dbGender,
+          relationship:   dbRel,
+          customRelation: dbCustom,
         });
 
         setLoading(false);
@@ -106,15 +102,16 @@ export default function SeniorProfilePage() {
 
     const { error } = await supabase
       .from("senior_profiles")
-      .update({ name: name.trim() })
+      .update({
+        name:            name.trim(),
+        age:             age ? parseInt(age, 10) : null,
+        gender:          gender || null,
+        relationship:    relationship || null,
+        custom_relation: customRelation || null,
+      })
       .eq("id", seniorId);
 
     if (!error) {
-      localStorage.setItem(LS.age,          age);
-      localStorage.setItem(LS.gender,       gender);
-      localStorage.setItem(LS.relationship, relationship);
-      localStorage.setItem(LS.custom,       customRelation);
-
       setSaved({ name: name.trim(), age, gender, relationship, customRelation });
       setToast("已保存");
     } else {

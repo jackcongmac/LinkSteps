@@ -3,6 +3,7 @@
 > **战略基调**："关怀，不是监管"
 > 本文档是 Senior 模块的产品蓝图，供 Architect / Frontend / QA 三端对齐使用。
 > 依据：`SENIOR_VISION.md` + `SENIOR_BACKEND_PRD.md`
+> **最后更新**：2026-03-31（反映 v0.4 实现状态）
 
 ---
 
@@ -10,12 +11,11 @@
 
 | Role | 中文 | 核心任务 | UI 风格 |
 |---|---|---|---|
-| `senior` | 长辈 | 发送平安信号 / 接收语音关怀 | 极简、无数字、无焦虑 |
-| `carer` | 晚辈 | 读取 AI 解读 / 触发关怀动作 | 全知看板、行动导向 |
-| `admin_carer` | 主要晚辈 | 以上 + 管理设备授权 / 成员 | 同上 + 设置权限 |
+| `senior` | 长辈 | 发送平安信号 / 接收晚辈消息 / 语音留言 | 极简、大字体、无数字、无焦虑 |
+| `carer` | 晚辈 | 读取健康状态 / 查看动态 / 发送关怀消息 | 全知看板、行动导向 |
+| `admin_carer` | 主要晚辈 | 以上 + 管理长辈档案 / 成员 | 同上 + 设置权限 |
 
-> 角色存储在 `profiles.role`，已有 `teacher/therapist/parent` 体系。
-> Senior 模块新增 `senior` 和 `carer` 两个 role value。
+> 角色存储在 `profiles.role`。Senior 模块新增 `senior` 和 `carer` 两个 role value。
 
 ---
 
@@ -26,24 +26,29 @@
 ```
 /senior-home
 │
+├── [主屏] 顶部信息卡
+│     ├── 北京时间时钟（大字，实时刷新）
+│     ├── 天气（图标 + 温度 + 气压条 + 今日范围）
+│     ├── AI 气象洞察（一句话，关怀口吻）
+│     └── [有未读消息时] 晚辈最新消息 + 发件人名 + 时间 + 已读按钮
+│
 ├── [主屏] 平安扣 (Peace Button)
-│     ├── 巨型圆形按钮，整屏点击区
-│     ├── 默认状态：绿色"我很好"
-│     └── 点击后：动画 + 发送 check-in 信号
+│     ├── 巨型绿色圆形按钮（256px），全屏呼吸动画
+│     ├── 点击：发送 check-in 信号 → 显示"已通知 [晚辈名]"
+│     └── Fire-and-forget：UI 始终成功，失败静默 log
 │
-├── [语音信箱] Voice Inbox
-│     ├── 列表：晚辈发来的语音/TTS 消息
-│     └── 一键播放（无需打字）
-│
-└── [极简设置] Settings (隐藏入口)
-      └── 仅显示"退出登录"
+└── [操作区]
+      ├── 语音留言 (VoiceRecorder)：录音 ≤60s → 上传 → 发给晚辈
+      └── 快捷请求 (QuickRequest)：
+            ├── 「给我回个微信」→ 插入 __WECHAT_REQUEST__ 标记
+            └── 「给我回个电话」→ 插入 __CALL_REQUEST__ 标记
 ```
 
 **长辈端 UI 铁律：**
-- 不显示任何健康数字（步数、心率等）
+- 不显示任何健康数字（步数、心率、气压值等原始数字不在主界面出现）
 - 不显示任何"警告"或"异常"状态
-- 字体 ≥ 20px，点击区 ≥ 60×60px
-- 背景纯白，单色，无渐变
+- 字体 ≥ 18px，点击区 ≥ 60×60px
+- 背景 `bg-stone-50`，白色卡片，无渐变
 
 ---
 
@@ -52,277 +57,305 @@
 ```
 /carer
 │
-├── [首页] Dashboard  ← 核心页
-│     ├── 顶部：用户问候 + 今日日期
-│     ├── SeniorStatusCard × N（每位长辈一张）
-│     │     ├── 状态徽章：🟢 Emerald / 🟡 Amber / 🔴 Rose / 🚨 SOS
-│     │     ├── AI 解读句：「爸今天睡得不错，已出门散步」
-│     │     ├── 最后活跃时间
-│     │     └── 快捷动作：[发消息] [拨打电话]
-│     └── 右上角：通知铃（SOS 红点）
+├── [顶部信息卡] EnvTile（晚辈侧）
+│     ├── 上海本地时钟 + 时段（早晨/上午/下午…）
+│     ├── 上海天气（图标 + 温度 + 气压条）
+│     └── AI 天气洞察（一句话，提醒晚辈关怀长辈）
 │
-├── [长辈详情] /carer/senior/[seniorId]
-│     ├── Header：姓名 + 当前状态 + 城市天气
-│     ├── AI Insight Card（完整版，含建议动作）
-│     ├── 数据面板（按 Tier 分组，文字化呈现）
-│     │     ├── Tier 1 — 生活画布
-│     │     │     ├── 今日步数（配文字描述，不单纯显示数字）
-│     │     │     ├── 天气上下文（气压 + 体感）
-│     │     │     └── 首次活跃时间（起床节律）
-│     │     ├── Tier 2 — 体感状态（需手环，Phase 2）
-│     │     │     ├── 睡眠质量（「睡得较浅」而非「5.2h deep sleep」）
-│     │     │     └── HRV 趋势（「恢复状态良好」）
-│     │     └── Tier 3 — 仅后端使用，不对晚辈直接显示原始值
-│     └── 历史轴：过去 7 天 AI 状态变化
+├── [发消息] ComposeMessage
+│     └── 最多 100 字；发送时携带 sender_name（关系称谓 > 名字 > 邮箱前缀）
 │
-├── [关怀动作] /carer/connect/[seniorId]
-│     ├── 发送语音消息（TTS 合成，老人端可播放）
-│     ├── 发起视频通话（外链微信/FaceTime）
-│     └── 发送关怀便签（文字 → TTS → 推送至老人端）
+├── [状态卡] StatusHeader（实时心率环 + 在线状态）
+│     ├── 正常：翠绿呼吸环 + 「一切安好」
+│     ├── 休眠：灰色 + 「平安扣休眠中」
+│     ├── 信号断开：琥珀色 + 时间戳
+│     └── 心率异常（>120 bpm）：红色环 + 「立即拨打」按钮 + 自动写入 alert 记录
 │
-├── [历史洞察] /carer/insights
-│     ├── 时间线：每日 AI 评估记录
-│     └── 状态趋势图（Emerald→Amber→Rose 颜色条）
+├── [睡眠洞察] SleepInsightsCard
+│     └── 今日睡眠时长 + 状态（deep/light/nap/resting/awake）
 │
-└── [设置] /carer/settings
-      ├── 我的长辈（添加 / 管理）
-      │     └── 生成 Magic Link → 发送至长辈微信
-      ├── 设备管理（已授权设备列表）
-      └── 通知偏好（SOS 必开，其余可配）
+├── [AI 健康洞察] WellnessCard
+│     └── 综合步数 + 心率 + 睡眠 + 气象的规则引擎输出
+│
+├── [长辈身份卡片] SeniorIdentityTile → 跳转 /carer/profile
+│     └── 名字 + 年龄 + 性别 + 设备连接状态
+│
+└── [平安扣信号] FamilyTimeline
+      ├── 默认展示「今天」；点击向下箭头逐日展开（最多 7 天）
+      ├── 「收起」按钮 + 3 分钟自动收起
+      ├── 事件类型：平安信号 / 文字消息 / 语音留言 / 微信请求 / 电话请求 / 系统警报
+      └── 时间格式：刚刚 / X分钟前·HH:mm / X小时前·HH:mm / 昨天·HH:mm / 周X·HH:mm
+
+/carer/profile
+│
+└── [长辈信息编辑页]
+      ├── 姓名 / 年龄 / 与您的关系（父亲/母亲/公公/婆婆/其他）/ 性别
+      ├── 脏状态追踪：未保存徽章 + 保存按钮激活/灰色
+      ├── 返回时若有未保存更改 → 弹窗确认（放弃/继续编辑）
+      └── [预留] 平安扣邀请二维码（功能即将上线）
 ```
 
 ---
 
 ## 2. 核心用户旅程 (Key User Journeys)
 
-### Journey A — 晚辈首次添加长辈
+### Journey A — 晚辈添加长辈档案
 
 ```
-晚辈进入 Settings → 点击「添加长辈」
-→ 填写姓名 + 选择城市
-→ 系统生成一次性 Magic Link（含 session_id）
-→ 晚辈将链接发送至长辈微信 / 短信
-→ 长辈点击链接 → 跳转至设备厂商 OAuth 授权页（华为/小米等）
-→ 长辈点击「同意」→ 后端 /api/auth/callback 接收 token
-→ 后端静默存储 Access Token + Refresh Token
-→ 晚辈端 Dashboard 出现新的 SeniorStatusCard ✅
+晚辈进入 /carer/profile → 填写姓名 + 年龄 + 关系 + 性别
+→ 点击「保存」→ UPDATE senior_profiles（RLS：created_by = auth.uid()）
+→ Dashboard 自动读取最新 senior_profiles.name 显示
+→ [预留] 生成平安扣邀请二维码 → 发送至长辈微信
 ```
 
-### Journey B — 晚辈早晨查看状态（最高频场景）
+### Journey B — 晚辈早晨查看长辈状态（最高频场景）
 
 ```
-晚辈打开 App → Dashboard 自动加载
-→ SeniorStatusCard 显示 AI 状态（🟢 平稳 / 🟡 关注）
-→ 点击卡片 → 进入详情页
-→ 阅读 AI 解读句（「妈今天活动量偏低，睡眠较浅…」）
-→ 点击「发消息」→ 录制语音 → 发送至长辈语音信箱
+晚辈打开 /carer → 自动加载 StatusHeader
+→ 正常状态（绿色）→ 查看 FamilyTimeline 昨日/今日动态
+→ 查看 SleepInsightsCard（昨夜睡眠）
+→ 查看 WellnessCard（今日 AI 洞察）
+→ 点击 ComposeMessage → 发一条文字消息
+→ 消息出现在 FamilyTimeline（实时 Realtime 更新）
 ```
 
 ### Journey C — 长辈发送平安信号
 
 ```
-长辈打开 App → 看到绿色平安扣
-→ 点击 → 动画反馈（波纹扩散）
-→ 所有晚辈收到推送：「妈妈 09:32 发来了平安信号 💚」
+长辈打开 /senior-home → 看到绿色平安扣
+→ 点击 → 呼吸动画 + 「已通知晚辈名」4秒提示
+→ checkins 表插入新行
+→ 晚辈端 FamilyTimeline 实时新增「发送了平安信号」条目
 ```
 
-### Journey D — 紧急 SOS（跌倒检测）
+### Journey D — 心率异常自动告警
 
 ```
-设备检测到 fall_detection_event = true
-→ 后端立即触发 SOS Override（跳过 AI 分析队列）
-→ WebSocket / Push 推送至所有关联晚辈
-→ 晚辈 App 弹出全屏 Rose Alert：
-   「🚨 紧急预警：设备检测到意外跌倒，请立刻启动应急联络！」
-→ 提供快捷操作：[拨打长辈电话] [联系紧急联系人]
+health-simulator（或真实设备）写入 health_metrics：heart_rate > 120
+→ StatusHeader 检测到 isAnomaly（边界：false → true）
+→ 自动 INSERT messages：type='alert', content='心率异常：XXX 次/分，系统已触发提醒'
+→ FamilyTimeline 实时出现红色 ⚠️ 告警卡片
+→ StatusHeader 显示「立即拨打妈妈」按钮
+```
+
+### Journey E — 长辈发语音留言
+
+```
+长辈点击 VoiceRecorder → 录制（≤60s）
+→ 上传至 Supabase Storage：voice-memos/{seniorId}/{messageId}.webm
+→ INSERT messages：type='voice', audio_url=path
+→ 晚辈端 FamilyTimeline 出现「发来一段语音」条目
+→ 晚辈点击「播放」→ 生成 60s 签名 URL → 播放音频
+```
+
+### Journey F — 长辈请求回电 / 回微信
+
+```
+长辈点击「给我回个微信/电话」
+→ INSERT messages：type='text', content='__WECHAT_REQUEST__' / '__CALL_REQUEST__'
+→ FamilyTimeline 显示「给[长辈名]回个微信/电话」提示卡片
 ```
 
 ---
 
 ## 3. 数据架构对齐 (Data Architecture)
 
-### 3-A 数据库表 (Supabase)
+### 3-A 数据库表（当前实现，截至 2026-03-31）
 
+#### `senior_profiles` — 长辈档案
 ```sql
--- 长辈档案
-senior_profiles (
-  id uuid PK,
-  carer_id uuid FK → profiles.id,   -- 主要晚辈
-  name text,
-  city text,                          -- 用于天气 API
-  created_at timestamptz
-)
+id            uuid PK
+created_by    uuid FK → auth.users    -- 创建者（主晚辈）
+name          text NOT NULL
+city          text                    -- 用于天气 API（预留）
+age           integer                 -- 新增：年龄
+gender        text                    -- 新增：'男' | '女'
+relationship  text                    -- 新增：'父亲'|'母亲'|'公公'|'婆婆'|'其他'
+custom_relation text                  -- 新增：relationship='其他' 时的自定义
+avatar_url    text
+created_at    timestamptz
+```
+**RLS**：创建者完整 CRUD；绑定晚辈（via carer_relationships）可 SELECT；UPDATE 政策使用 `created_by = auth.uid()`
 
--- 晚辈与长辈的关系（支持一个长辈多个晚辈）
-carer_relationships (
-  id uuid PK,
-  senior_id uuid FK → senior_profiles.id,
-  carer_id  uuid FK → profiles.id,
-  role text,                          -- 'primary' | 'secondary'
-  created_at timestamptz
-)
-
--- 每日健康快照（Tier 1 + Tier 2）
-health_snapshots (
-  id uuid PK,
-  senior_id uuid FK,
-  snapshot_date date,
-  -- Tier 1
-  steps int,
-  first_active_time timestamptz,      -- 首次亮屏/活动时间
-  weather_pressure_hpa float,
-  weather_temp_c float,
-  weather_text text,
-  -- Tier 2（可为 null，视设备而定）
-  resting_heart_rate int,
-  sleep_duration_hours float,
-  deep_sleep_hours float,
-  hrv_ms float,
-  -- Tier 3（可为 null，仅后端 AI 参考）
-  body_temp_celsius float,
-  systolic_bp int,
-  diastolic_bp int,
-  fall_detected boolean DEFAULT false,
-  created_at timestamptz
-)
-
--- 7天滚动基线（后端 cron 维护）
-senior_baselines (
-  senior_id uuid PK,
-  avg_steps float,
-  avg_hrv float,
-  avg_sleep_hours float,
-  avg_resting_hr float,
-  computed_at timestamptz
-)
-
--- AI 评估结果（持久化，用于历史趋势）
-ai_assessments (
-  id uuid PK,
-  senior_id uuid FK,
-  assessed_at timestamptz,
-  status text,                        -- 'emerald' | 'amber' | 'rose' | 'sos'
-  insight_text text,                  -- AI 生成的关怀句
-  action_suggestion text,             -- 给晚辈的行动建议
-  data_tier int,                      -- 1 | 2 | 3，本次依赖的最高层级
-  created_at timestamptz
-)
-
--- 设备 OAuth 凭据（加密存储）
-device_connections (
-  id uuid PK,
-  senior_id uuid FK,
-  vendor text,                        -- 'huawei' | 'xiaomi' | 'apple' | 'werun'
-  access_token_encrypted text,
-  refresh_token_encrypted text,
-  token_expires_at timestamptz,
-  last_synced_at timestamptz,
-  created_at timestamptz
-)
-
--- 平安扣 Check-in 事件
-checkins (
-  id uuid PK,
-  senior_id uuid FK,
-  checked_in_at timestamptz,
-  source text                         -- 'button' | 'auto_active'
-)
-
--- 语音消息（晚辈 → 长辈）
-voice_messages (
-  id uuid PK,
-  from_carer_id uuid FK,
-  to_senior_id  uuid FK,
-  text_content text,                  -- 原始文字（TTS 源）
-  audio_url text,                     -- Supabase Storage 链接
-  is_read boolean DEFAULT false,
-  created_at timestamptz
-)
+#### `carer_relationships` — 晚辈-长辈绑定关系
+```sql
+id         uuid PK
+senior_id  uuid FK → senior_profiles
+carer_id   uuid FK → auth.users
+role       text    -- 'primary' | 'secondary'
+created_at timestamptz
 ```
 
-### 3-B AI 状态判定逻辑（引用 PRD）
+#### `checkins` — 平安信号事件
+```sql
+id           uuid PK
+senior_id    uuid FK → senior_profiles
+checked_in_at timestamptz
+source       text    -- 'button' | 'auto_active'
+```
+**数据保留**：pg_cron 每日 11:00 北京时间删除 7 天前记录
+
+#### `messages` — 统一消息表（双向 + 系统事件）
+```sql
+id               uuid PK
+senior_id        uuid FK → senior_profiles
+sender_id        uuid FK → auth.users
+sender_role      text    -- 'carer' | 'senior'
+sender_name      text    -- 冗余存储：关系称谓/名字（避免跨用户 RLS 查询）
+type             text    -- 'text' | 'voice' | 'alert'
+content          text    -- text/alert 类型必填；voice 为 null
+audio_url        text    -- voice 类型必填；text/alert 为 null
+audio_mime_type  text    -- 'audio/webm' | 'audio/mp4'
+is_read          boolean DEFAULT false
+read_at          timestamptz
+created_at       timestamptz
+```
+**特殊 content 标记**：
+- `__WECHAT_REQUEST__` → 长辈请求晚辈回微信
+- `__CALL_REQUEST__`   → 长辈请求晚辈回电话
+
+**数据保留**：pg_cron 每日 11:00 北京时间删除 7 天前记录
+**Realtime**：`REPLICA IDENTITY FULL` 已开启（UPDATE 事件包含完整行数据）
+
+#### `health_metrics` — 实时健康数据（垂直 Schema）
+```sql
+id           uuid PK
+senior_id    uuid FK → senior_profiles
+metric_type  text    -- 'heart_rate' | 'steps'
+value        float
+measured_at  timestamptz
+```
+**Realtime**：已启用，晚辈端状态卡实时更新
+
+#### `sleep_sessions` — 睡眠会话
+```sql
+id            uuid PK
+senior_id     uuid FK → senior_profiles
+session_date  date
+total_hours   float
+deep_hours    float
+light_hours   float
+rem_hours     float
+current_state text    -- 'awake'|'deep'|'light'|'nap'|'resting'|null
+```
+
+#### `health_snapshots` — 每日健康快照（Tier 1–3）
+（详见 SENIOR_BACKEND_PRD.md §2）
+
+#### `senior_baselines` / `ai_assessments` / `device_connections`
+（详见 SENIOR_BACKEND_PRD.md）
+
+### 3-B AI 状态判定逻辑
 
 | 状态 | 颜色 | 触发条件 | 晚辈端展示 |
 |---|---|---|---|
 | **Emerald** | 🟢 翡翠绿 | 所有指标在基线内 | 「爸今天睡得不错，已出门散步」 |
 | **Amber** | 🟡 琥珀色 | 步数骤降 OR 睡眠变浅 | 「妈这两天活动量偏低，建议视频聊聊」 |
-| **Rose** | 🔴 玫瑰红 | 气压剧降 + 静息心率异常 | 「⚠️ 气压骤降，体征异动，请致电确认」 |
-| **SOS** | 🚨 紧急 | `fall_detected = true` | 全屏弹窗，WebSocket 立即推送 |
+| **Rose** | 🔴 玫瑰红 | 气压骤降 + 静息心率异常 | 「⚠️ 气压骤降，体征异动，请致电确认」 |
+| **SOS** | 🚨 紧急 | `fall_detected = true` | 全屏弹窗，Realtime 立即推送 |
+| **心率异常** | 🔴 实时 | `heart_rate > 120`（来自 health_metrics） | StatusHeader 红色环 + alert 写入 Timeline |
+
+### 3-C FeedItem 类型体系
+
+```typescript
+type FeedItem =
+  | { kind: 'checkin' }                                    // 平安信号
+  | { kind: 'text';    content; sender_role; is_read }     // 文字消息
+  | { kind: 'voice';   audio_url; sender_role }            // 语音留言
+  | { kind: 'wechat_request'; sender_role }                // 回微信请求
+  | { kind: 'call_request';   sender_role }                // 回电话请求
+  | { kind: 'alert';   content }                           // 系统警报（心率/信号）
+```
 
 ---
 
 ## 4. API 路由合约 (API Contract)
 
-```
-POST /api/senior/create              → 创建 senior_profile + 返回 Magic Link
-GET  /api/senior/[id]/status         → 最新 AI assessment（晚辈端实时拉取）
-POST /api/senior/[id]/checkin        → 处理平安扣点击
-GET  /api/senior/[id]/history        → 历史 ai_assessments 列表
-
-GET  /api/weather?city=beijing       → QWeather 代理（已实现 ✅）
-
-POST /api/auth/device/initiate       → 生成 OAuth Magic Link（带 session_id）
-GET  /api/auth/device/callback       → 厂商 OAuth 回调，存储 token
-
-POST /api/health/sync/[seniorId]     → 手动触发单个长辈数据同步（dev 用）
-     /api/health/sync (Cron Job)     → 定时批量拉取所有活跃 senior 的数据
-
-POST /api/messages/send              → 晚辈发送语音/TTS 消息至长辈
-GET  /api/messages/[seniorId]        → 长辈拉取未读消息列表
-```
+| 路由 | 方法 | 状态 | 说明 |
+|---|---|---|---|
+| `/api/weather?city=beijing` | GET | ✅ 已实现 | QWeather 代理，返回 temp/pressure/icon_code |
+| `/api/senior/checkin` | POST | ✅ 已实现 | 平安扣点击写入 checkins |
+| `/api/senior/health-sync` | POST | ✅ 已实现 | 手动触发健康数据同步 |
+| `/api/senior/voice-url` | GET | ✅ 已实现 | 生成 Supabase Storage 签名 URL |
+| `/api/senior/create` | POST | 📋 待实现 | 创建 senior_profile + 返回 QR 邀请链接 |
+| `/api/senior/[id]/status` | GET | 📋 待实现 | 最新 AI assessment |
+| `/api/senior/[id]/history` | GET | 📋 待实现 | 历史 ai_assessments 列表 |
+| `/api/auth/device/initiate` | POST | 📋 待实现 Phase 2 | 生成 OAuth Magic Link |
+| `/api/auth/device/callback` | GET | 📋 待实现 Phase 2 | 厂商 OAuth 回调 |
+| `/api/health/sync` | POST/Cron | 📋 待实现 Phase 2 | 批量拉取健康数据 |
 
 ---
 
 ## 5. 前端组件树 (Component Inventory)
 
-```
-src/components/senior/
-│
-├── carer/
-│   ├── SeniorStatusCard.tsx        ← Dashboard 核心卡片
-│   ├── SeniorDetailPanel.tsx       ← 详情页数据面板
-│   ├── AiInsightCard.tsx           ← AI 解读 + 行动建议
-│   ├── HealthTierSection.tsx       ← Tier 1/2 数据行（文字化）
-│   ├── StatusBadge.tsx             ← Emerald/Amber/Rose/SOS 徽章
-│   ├── SeniorTimeline.tsx          ← 7 天历史状态轴
-│   └── SosAlert.tsx                ← 全屏紧急弹窗
-│
-├── senior/
-│   ├── PeaceButton.tsx             ← 巨型平安扣（长辈主屏核心）
-│   ├── VoiceInbox.tsx              ← 语音消息列表
-│   └── VoiceMessageItem.tsx        ← 单条消息 + 播放控件
-│
-└── shared/
-    ├── WeatherBadge.tsx            ← 城市 + 天气 + 气压状态（已有原型）
-    └── MagicLinkSheet.tsx          ← 生成/分享设备授权链接的 bottom sheet
-```
+### 长辈端 (`src/components/senior/senior/`)
+
+| 组件 | 功能 |
+|---|---|
+| `PeaceButton.tsx` | 256px 呼吸圆形按钮；fire-and-forget check-in；成功提示 4s |
+| `VoiceRecorder.tsx` | MediaRecorder API；≤60s；上传至 `voice-memos/`；显示波形进度 |
+| `QuickRequest.tsx` | 两个快捷按钮；插入特殊 content 标记（WECHAT/CALL REQUEST） |
+| `MessageBanner.tsx` | 展示晚辈最新文字/语音消息（已被 senior-home 内联实现取代） |
+| `BottomNav.tsx` | 底部导航 |
+
+### 晚辈端 (`src/components/senior/carer/`)
+
+| 组件 | 功能 |
+|---|---|
+| `ComposeMessage.tsx` | 发消息；携带 sender_name（关系称谓 > display_name > 邮箱前缀） |
+| `FamilyTimeline.tsx` | 合并 checkins + messages → FeedItem[]；7天展开；自动收起 |
+| `CheckinTimeline.tsx` | 平安信号历史；Realtime 订阅 |
+| `SeniorStatusCard.tsx` | 长辈卡片摘要（Dashboard 用） |
+| `StatusBadge.tsx` | Emerald/Amber/Rose/SOS 四色徽章 |
+| `AiInsightCard.tsx` | 详细 AI 解读 + 行动建议 |
+
+### 页面级组件（内联于 page.tsx）
+
+| 位置 | 组件 | 功能 |
+|---|---|---|
+| `carer/page.tsx` | `EnvTile` | 上海时钟 + 天气 + 气压条 + AI 洞察 |
+| `carer/page.tsx` | `StatusHeader` | 实时心率环 + isAnomaly 检测 + onAnomaly 回调 |
+| `carer/page.tsx` | `SleepInsightsCard` | 睡眠状态卡片 |
+| `carer/page.tsx` | `WellnessCard` | 综合健康洞察 |
+| `carer/page.tsx` | `SeniorIdentityTile` | 长辈身份 + 设备状态 |
+| `carer/page.tsx` | `NightStatusPanel` | 夜间睡眠状态面板 |
+| `senior-home/page.tsx` | EnvTile（内联） | 北京时钟 + 天气 + 气压条 + AI 洞察 + 晚辈消息展示 |
 
 ---
 
-## 6. Phase 1 MVP 交付范围
+## 6. Phase 交付状态
 
-**原则：数据可 mock，但完整用户旅程必须跑通。**
-
-| 模块 | Phase 1 MVP 内容 | 数据来源 |
+| 功能 | 计划 Phase | 实现状态 |
 |---|---|---|
-| 长辈端主屏 | 平安扣按钮 + 发送 check-in | Supabase 写入 |
-| 晚辈端 Dashboard | SeniorStatusCard，显示 AI 状态 | mock metrics → SeniorPredictor |
-| 天气集成 | 城市天气 + 气压状态 | QWeather API ✅ |
-| AI 评估引擎 | Tier 1 规则引擎 (senior-predictor.ts) | mock + weather ✅ |
-| 设备授权流程 | Magic Link 生成 + 展示（不对接真实 OAuth，Phase 1 用 mock token） | — |
-| 历史趋势 | 7 天状态时间线（数据可 seed） | Supabase |
-| SOS 告警 | 基础 push 通知（Phase 1 可用 polling，Phase 2 换 WebSocket） | Supabase Realtime |
-| 语音消息 | Phase 1 暂缓，先做文字消息 → Phase 2 升级 TTS | — |
+| 平安扣按钮 + check-in | Phase 1 MVP | ✅ 已实现 |
+| 长辈发语音留言 | Phase 1 | ✅ 已实现 |
+| 快捷请求（微信/电话） | Phase 1 | ✅ 已实现 |
+| 晚辈发文字消息 | Phase 1 | ✅ 已实现（含 sender_name） |
+| 晚辈查看平安信号 Timeline | Phase 1 | ✅ 已实现（7天 + 自动收起） |
+| 长辈端接收消息 + 已读 | Phase 1 | ✅ 已实现 |
+| 天气集成 + 气压洞察 | Phase 1 | ✅ 已实现（QWeather） |
+| 长辈档案编辑（姓名/年龄/关系/性别） | Phase 1 | ✅ 已实现 |
+| 7 天数据保留（pg_cron） | Phase 1 | ✅ 已实现 |
+| 心率异常实时警报 + 自动 Timeline 记录 | Phase 1 | ✅ 已实现 |
+| 睡眠状态卡 | Phase 2 | ✅ 已实现（dev simulator） |
+| 综合 AI 健康洞察（WellnessCard） | Phase 2 | ✅ 已实现（规则引擎） |
+| 长辈邀请二维码 | Phase 2 | 📋 UI 预留，待实现 |
+| 设备 OAuth 接入（华为/小米） | Phase 2 | 📋 待实现 |
+| SOS 跌倒全屏弹窗 | Phase 3 | 📋 待实现 |
+| 晚辈多人协同（carer_relationships） | Phase 3 | 📋 待实现 |
+| 历史状态趋势图 | Phase 3 | 📋 待实现 |
 
 ---
 
 ## 7. 技术约束与安全护栏
 
-1. **RLS 强制隔离**：晚辈只能查询与自己有 `carer_relationships` 关联的 senior 数据。
-2. **Tier 3 数据仅后端可见**：`health_snapshots` 中的血压、体温字段，前端 API 不返回原始值，只返回 AI 翻译后的文字。
-3. **AI 输出护栏**（见 PRD §4）：禁止输出临床疾病名称，所有异常翻译为中性词汇，必须附带轻量级行动建议。
-4. **Token 加密**：`device_connections.access_token_encrypted` 使用 Supabase Vault 或 AES-256 加密存储，禁止明文入库。
-5. **SOS 不可被防抖**：跌倒事件推送不经过任何延迟队列，直接走 Supabase Realtime broadcast。
+1. **RLS 强制隔离**：晚辈只能查询与自己有关联的 senior 数据。`senior_profiles` UPDATE 只允许 `created_by = auth.uid()`。
+2. **Tier 3 数据仅后端可见**：血压、体温字段前端 API 不返回原始值，只返回 AI 翻译文字。
+3. **AI 输出护栏**：禁止临床疾病名称，异常统一翻译为中性词汇，必须附轻量行动建议（见 SENIOR_BACKEND_PRD.md §4）。
+4. **Token 加密**：device_connections 中 OAuth token 使用 AES-256 加密，禁止明文。
+5. **SOS 不可防抖**：fall_detected 推送不经延迟队列，直接 Realtime broadcast。
+6. **数据保留 7 天**：messages + checkins 通过 pg_cron 定时清除，voice 文件需额外清理 Storage（待实现）。
+7. **sender_name 冗余存储**：消息发送时写入 sender_name，避免长辈端因 RLS 无法跨用户读取 profiles。
 
 ---
 
@@ -330,8 +363,8 @@ src/components/senior/
 
 | 维度 | Child 模块 | Senior 模块 | 共存方案 |
 |---|---|---|---|
-| 路由 | `/log`, `/insights`, `/settings` | `/senior-home`, `/carer`, `/carer/settings` | 路由隔离，Role-based redirect |
-| 组件 | `MoodCard`, `RecentLogs` 等 | `PeaceButton`, `SeniorStatusCard` 等 | 独立目录，无交叉 |
-| 数据库 | `logs`, `profiles` | 新增 `senior_profiles` 等 7 张表 | Supabase 同一项目，RLS 隔离 |
-| AI 引擎 | `predictor.ts` (Child) | `senior-predictor.ts` (Senior) | 独立文件，共享 `THREAT_STYLE` 常量 |
+| 路由 | `/log`, `/insights`, `/settings` | `/senior-home`, `/carer`, `/carer/profile` | 路由隔离，Role-based redirect |
+| 组件 | `MoodCard`, `RecentLogs` 等 | `PeaceButton`, `FamilyTimeline` 等 | 独立目录，无交叉 |
+| 数据库 | `logs`, `profiles` | `senior_profiles` + 7 张新表 | Supabase 同一项目，RLS 隔离 |
+| AI 引擎 | `predictor.ts` (Child) | `senior-predictor.ts` + `wellness-score.ts` | 独立文件 |
 | 认证 | Supabase Magic Link | 同左 | 统一 Auth，role 字段区分流向 |

@@ -26,10 +26,20 @@ export default function ComposeMessage({ seniorId }: Props) {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { setSending(false); setErr("请先登录"); return; }
 
+    // Try profile first; fall back to email prefix so there's always a name
+    const { data: prof } = await supabase
+      .from("profiles")
+      .select("display_name, relation_title")
+      .eq("id", user.id)
+      .maybeSingle();
+    const p = prof as { display_name?: string; relation_title?: string } | null;
+    const name = p?.relation_title || p?.display_name || user.email?.split("@")[0] || null;
+
     const { error } = await supabase.from("messages").insert({
       senior_id:   seniorId,
       sender_id:   user.id,
       sender_role: "carer",
+      sender_name: name,
       type:        "text",
       content:     trimmed,
     });

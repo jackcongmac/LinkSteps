@@ -9,7 +9,8 @@ export interface MessageRow {
   senior_id:       string;
   sender_id:       string;
   sender_role:     'carer' | 'senior';
-  type:            'text' | 'voice';
+  sender_name:     string | null;
+  type:            'text' | 'voice' | 'alert';
   content:         string | null;
   audio_url:       string | null;
   audio_mime_type: string | null;
@@ -19,11 +20,12 @@ export interface MessageRow {
 }
 
 export type FeedItem =
-  | { kind: 'checkin';       id: string; created_at: string }
-  | { kind: 'text';          id: string; created_at: string; content: string; sender_role: 'carer' | 'senior'; is_read: boolean }
-  | { kind: 'voice';         id: string; created_at: string; audio_url: string; audio_mime_type: string | null; sender_role: 'carer' | 'senior' }
+  | { kind: 'checkin';        id: string; created_at: string }
+  | { kind: 'text';           id: string; created_at: string; content: string; sender_role: 'carer' | 'senior'; is_read: boolean }
+  | { kind: 'voice';          id: string; created_at: string; audio_url: string; audio_mime_type: string | null; sender_role: 'carer' | 'senior' }
   | { kind: 'wechat_request'; id: string; created_at: string; sender_role: 'carer' | 'senior' }
-  | { kind: 'call_request';   id: string; created_at: string; sender_role: 'carer' | 'senior' };
+  | { kind: 'call_request';   id: string; created_at: string; sender_role: 'carer' | 'senior' }
+  | { kind: 'alert';          id: string; created_at: string; content: string };
 
 /** Merge checkins + messages into one sorted feed (newest first) */
 export function buildFeed(
@@ -46,6 +48,9 @@ export function buildFeed(
           audio_mime_type: m.audio_mime_type,
           sender_role: m.sender_role,
         };
+      }
+      if (m.type === 'alert') {
+        return { kind: 'alert', id: m.id, created_at: m.created_at, content: m.content! };
       }
       if (m.content === WECHAT_REQUEST) {
         return { kind: 'wechat_request', id: m.id, created_at: m.created_at, sender_role: m.sender_role };

@@ -167,6 +167,16 @@ function ItemContent({ item, isLatest, seniorName }: { item: FeedItem; isLatest:
     </div>
   );
 
+  if (item.kind === "alert") return (
+    <div className="flex flex-col gap-1 pt-0.5 flex-1 min-w-0">
+      <div className="inline-flex items-center gap-2 px-3 py-2 rounded-2xl bg-red-50 border border-red-100">
+        <span className="text-base">⚠️</span>
+        <p className="text-sm font-medium text-red-700">{item.content}</p>
+      </div>
+      <p className="text-xs text-slate-400 mt-0.5">{formatTimestamp(item.created_at)}</p>
+    </div>
+  );
+
   return null;
 }
 
@@ -249,6 +259,8 @@ export default function FamilyTimeline({ items, seniorName }: { items: FeedItem[
                     ? isLatest ? "bg-emerald-500 ring-4 ring-emerald-100" : "bg-emerald-200"
                     : item.kind === "call_request"
                     ? isLatest ? "bg-amber-400 ring-4 ring-amber-100" : "bg-amber-200"
+                    : item.kind === "alert"
+                    ? isLatest ? "bg-red-500 ring-4 ring-red-100" : "bg-red-200"
                     : isLatest ? "bg-emerald-500 ring-4 ring-emerald-100" : "bg-slate-200";
                 return (
                   <li key={item.id} className="relative flex gap-4 pb-6">

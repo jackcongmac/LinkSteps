@@ -207,9 +207,10 @@ interface StatusHeaderProps {
   onDismiss:    () => void;
   healthData:   HealthData | null;
   lastMetricAt: string | null;
+  onAnomaly?:   (heartRate: number) => void;
 }
 
-function StatusHeader({ status, pulse, onPulseEnd, onDismiss, healthData, lastMetricAt }: StatusHeaderProps) {
+function StatusHeader({ status, pulse, onPulseEnd, onDismiss, healthData, lastMetricAt, onAnomaly }: StatusHeaderProps) {
   // ── Watchdog: staleness derived from last health metric ──────
   const minutesSinceMetric = lastMetricAt
     ? (Date.now() - new Date(lastMetricAt).getTime()) / 60_000
@@ -219,6 +220,15 @@ function StatusHeader({ status, pulse, onPulseEnd, onDismiss, healthData, lastMe
 
   // Anomaly only meaningful when signal is fresh
   const isAnomaly = !isDormant && !isOffline && (healthData?.heartRate ?? 0) > 120;
+
+  // Fire onAnomaly once per transition false→true
+  const wasAnomaly = useRef(false);
+  useEffect(() => {
+    if (isAnomaly && !wasAnomaly.current && onAnomaly && healthData) {
+      onAnomaly(healthData.heartRate);
+    }
+    wasAnomaly.current = isAnomaly;
+  }, [isAnomaly]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const style = isAnomaly
     ? { bg: 'bg-red-50 border-red-200',     text: 'text-red-700',   dot: 'bg-red-100',   ring: 'border-red-400',   spin: 'border-t-red-600'   }
@@ -1220,6 +1230,21 @@ export default function CarerDashboard() {
       .finally(() => setBjWeatherLoad(false));
   }, []);
 
+  // ── Log health alert when anomaly fires ──────────────────────
+  const handleAnomaly = useCallback(async (heartRate: number) => {
+    if (!seniorId) return;
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    // Realtime subscription will pick this up and add it to the feed
+    await supabase.from("messages").insert({
+      senior_id:   seniorId,
+      sender_id:   user.id,
+      sender_role: "carer",
+      type:        "alert",
+      content:     `心率异常：${heartRate} 次/分，系统已触发提醒`,
+    });
+  }, [seniorId, supabase]);
+
   // ── Loading ──────────────────────────────────────────────────
 
   if (loading) {
@@ -1271,6 +1296,7 @@ export default function CarerDashboard() {
             onDismiss={() => setDismissedId(status.itemId)}
             healthData={healthData}
             lastMetricAt={lastMetricAt}
+            onAnomaly={handleAnomaly}
           />
           <SleepInsightsCard session={sleepSession} />
         </div>

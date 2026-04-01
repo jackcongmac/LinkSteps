@@ -44,12 +44,27 @@ export default function SeniorProfilePage() {
 
   // ── Load from DB ──────────────────────────────────────────────
   useEffect(() => {
+    // Try full select; fall back to name-only if schema cache hasn't picked up new columns yet
     supabase
       .from("senior_profiles")
       .select("id, name, age, gender, relationship, custom_relation")
       .limit(1)
-      .then(({ data, error }) => {
-        if (error) console.error("[profile] load error:", error.message);
+      .then(async ({ data, error }) => {
+        if (error) {
+          console.warn("[profile] full select failed, retrying name-only:", error.message);
+          const { data: fallback } = await supabase
+            .from("senior_profiles")
+            .select("id, name")
+            .limit(1);
+          const fb = (fallback as { id: string; name: string }[] | null)?.[0];
+          if (fb) {
+            setSeniorId(fb.id);
+            setName(fb.name);
+            setSaved({ name: fb.name, age: "", gender: "", relationship: "", customRelation: "" });
+          }
+          setLoading(false);
+          return;
+        }
         const row = (data as {
           id: string; name: string; age: number | null;
           gender: Gender | null; relationship: string | null;
@@ -101,7 +116,7 @@ export default function SeniorProfilePage() {
     if (!name.trim() || !seniorId || !isDirty) return;
     setSaving(true);
 
-    const { data: updated, error } = await supabase
+    const { error } = await supabase
       .from("senior_profiles")
       .update({
         name:            name.trim(),
@@ -110,24 +125,15 @@ export default function SeniorProfilePage() {
         relationship:    relationship || null,
         custom_relation: customRelation || null,
       })
-      .eq("id", seniorId)
-      .select("id, name, age, gender, relationship, custom_relation")
-      .single();
+      .eq("id", seniorId);
 
-    if (!error && updated) {
-      const savedAge = updated.age != null ? String(updated.age) : "";
-      const savedGender = (updated.gender ?? "") as Gender;
-      const savedRel = (updated.relationship ?? "") as Relationship | "";
-      const savedCustom = updated.custom_relation ?? "";
-      setName(updated.name);
-      setAge(savedAge);
-      setGender(savedGender);
-      setRelationship(savedRel);
-      setCustomRelation(savedCustom);
-      setSaved({ name: updated.name, age: savedAge, gender: savedGender, relationship: savedRel, customRelation: savedCustom });
+    if (!error) {
+      const trimmed = name.trim();
+      setName(trimmed);
+      setSaved({ name: trimmed, age, gender, relationship, customRelation });
       setToast("已保存");
     } else {
-      console.error("[profile] save error:", error?.message, "updated:", updated);
+      console.error("[profile] save error:", error.message);
       setToast("保存失败，请重试");
     }
 

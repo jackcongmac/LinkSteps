@@ -177,7 +177,7 @@ function formatSeconds(s: number): string {
   return `${m}:${sec.toString().padStart(2, "0")}`;
 }
 
-function deriveStatus(feed: FeedItem[], dismissedId: string | null): StatusInfo {
+function deriveStatus(feed: FeedItem[], dismissedId: string | null, seniorName: string): StatusInfo {
   const latest      = feed.find((item) => ACTION_KINDS.has(item.kind)) ?? null;
   const lastCheckin = feed.find((i) => i.kind === 'checkin') ?? null;
   const baseGood    = lastCheckin !== null && isWithin24h(lastCheckin.created_at);
@@ -191,8 +191,8 @@ function deriveStatus(feed: FeedItem[], dismissedId: string | null): StatusInfo 
 
   const ago = relativeTime(latest.created_at);
 
-  if (latest.kind === 'wechat_request') return { kind: 'wechat', label: '请求回复微信',   icon: '💬', subtext: `${ago}发来请求`, itemId: latest.id, dismissible: true };
-  if (latest.kind === 'call_request')   return { kind: 'call',   label: '请求回个电话',   icon: '📞', subtext: `${ago}发来请求`, itemId: latest.id, dismissible: true };
+  if (latest.kind === 'wechat_request') return { kind: 'wechat', label: `给${seniorName}回个微信`, icon: '💬', subtext: `${ago}发来请求`, itemId: latest.id, dismissible: true };
+  if (latest.kind === 'call_request')   return { kind: 'call',   label: `给${seniorName}回个电话`, icon: '📞', subtext: `${ago}发来请求`, itemId: latest.id, dismissible: true };
   if (latest.kind === 'voice')          return { kind: 'voice',  label: '收到新语音留言', icon: '🎙️', subtext: `${ago}发来语音`, itemId: latest.id, dismissible: true, audioUrl: latest.audio_url };
 
   return { kind: baseGood ? 'safe' : 'idle', label: baseGood ? '一切安好' : '建议问候', icon: baseGood ? '❤️' : '🔔', subtext: baseSubtext, itemId: null, dismissible: false };
@@ -1230,7 +1230,7 @@ export default function CarerDashboard() {
     );
   }
 
-  const status = deriveStatus(feed, dismissedId);
+  const status = deriveStatus(feed, dismissedId, seniorName);
 
   // Wellness score — recomputes whenever health or weather updates
   const wellness: WellnessResult | null = (healthData || bjWeather) ? calculateSeniorWellness({

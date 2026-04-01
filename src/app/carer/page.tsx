@@ -820,7 +820,7 @@ interface EnvTileProps {
 function EnvTile({ weather, loading }: EnvTileProps) {
   const bj = getBjClock();
   return (
-    <div className="rounded-3xl bg-white border border-slate-100 shadow-sm px-5 py-5 flex flex-col gap-3">
+    <div className="flex flex-col gap-3">
       {/* Clock row */}
       <div className="flex items-end justify-between">
         <div>
@@ -1270,13 +1270,14 @@ export default function CarerDashboard() {
     >
       <div className="max-w-md mx-auto px-4 pt-8 pb-10 flex flex-col gap-4">
 
-        {/* ① Environment — BJ clock + weather merged */}
-        <EnvTile weather={bjWeather} loading={bjWeatherLoad} />
-
-        {/* ② Send a message — immediately below environment */}
-        <div className="rounded-3xl bg-white border border-slate-100 shadow-sm px-5 py-5">
-          <p className="text-slate-700 font-semibold text-base mb-3">给妈妈发条消息</p>
-          <ComposeMessage seniorId={seniorId} />
+        {/* ① Environment + Compose — single merged tile */}
+        <div className="rounded-3xl bg-white border border-slate-100 shadow-sm px-5 py-5 flex flex-col gap-4">
+          <EnvTile weather={bjWeather} loading={bjWeatherLoad} />
+          <div className="border-t border-slate-100" />
+          <div>
+            <p className="text-slate-700 font-semibold text-base mb-3">给妈妈发条消息</p>
+            <ComposeMessage seniorId={seniorId} />
+          </div>
         </div>
 
         {/* ③④ Vitals cluster — connection + sleep, tight spacing */}

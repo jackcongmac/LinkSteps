@@ -1283,7 +1283,7 @@ export default function CarerDashboard() {
           <EnvTile weather={bjWeather} loading={bjWeatherLoad} />
           <div className="border-t border-slate-100" />
           <div>
-            <p className="text-slate-700 font-semibold text-base mb-3">给妈妈发条消息</p>
+            <p className="text-slate-700 font-semibold text-base mb-3">给{seniorName}发条消息</p>
             <ComposeMessage seniorId={seniorId} seniorName={seniorName} />
           </div>
         </div>

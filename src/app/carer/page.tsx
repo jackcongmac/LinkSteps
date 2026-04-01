@@ -902,43 +902,21 @@ function SeniorIdentityTile({ name, lastMetricAt }: SeniorIdentityTileProps) {
   const displayName = name.trim() || '长辈';
 
   return (
-    <div
-      className="rounded-3xl px-5 py-5 flex flex-col gap-4"
-      style={{ background: 'linear-gradient(135deg, #1e1b4b 0%, #312e81 100%)' }}
-    >
-      {/* Name + device badge */}
-      <div className="flex items-start justify-between">
-        <div>
-          <p className="text-indigo-300 text-[11px] font-medium uppercase tracking-widest mb-1">
-            平安扣绑定
-          </p>
-          <p className="text-white text-xl font-bold">{displayName}的平安扣</p>
-          <p className="text-indigo-300/50 text-[11px] mt-1">点击查看 / 编辑信息 ›</p>
-        </div>
-        <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/10 border border-white/10">
-          <span className={[
-            "w-1.5 h-1.5 rounded-full shrink-0",
-            dotCls,
-            isLive ? "animate-pulse" : "",
-          ].join(" ")} />
-          <span className="text-white/80 text-xs font-medium">{deviceStatus}</span>
-        </div>
+    <div className="rounded-3xl bg-white border border-slate-100 shadow-sm px-5 py-4 flex items-center justify-between">
+      <div>
+        <p className="text-slate-400 text-[11px] font-medium uppercase tracking-widest mb-0.5">
+          平安扣绑定
+        </p>
+        <p className="text-slate-800 text-lg font-bold">{displayName}的平安扣</p>
+        <p className="text-slate-400 text-[11px] mt-0.5">点击查看 / 编辑信息 ›</p>
       </div>
-
-      {/* Info grid */}
-      <div className="grid grid-cols-3 gap-0 divide-x divide-white/10">
-        <div className="flex flex-col gap-0.5 pr-4">
-          <span className="text-indigo-300/70 text-[11px]">年龄</span>
-          <span className="text-white/90 text-sm font-medium">未设置</span>
-        </div>
-        <div className="flex flex-col gap-0.5 px-4">
-          <span className="text-indigo-300/70 text-[11px]">关系</span>
-          <span className="text-white/90 text-sm font-medium">家人</span>
-        </div>
-        <div className="flex flex-col gap-0.5 pl-4">
-          <span className="text-indigo-300/70 text-[11px]">所在地</span>
-          <span className="text-white/90 text-sm font-medium">北京</span>
-        </div>
+      <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-slate-50 border border-slate-200 shrink-0">
+        <span className={[
+          "w-1.5 h-1.5 rounded-full shrink-0",
+          dotCls,
+          isLive ? "animate-pulse" : "",
+        ].join(" ")} />
+        <span className="text-slate-600 text-xs font-medium">{deviceStatus}</span>
       </div>
     </div>
   );

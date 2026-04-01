@@ -14,8 +14,7 @@
  */
 
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
-import Link from "next/link";
-import { Play, Pause, UserCog } from "lucide-react";
+import { Play, Pause } from "lucide-react";
 import { createClient } from "@/lib/supabase";
 import type { CheckinRow } from "@/components/senior/carer/CheckinTimeline";
 import type { RealtimePostgresInsertPayload, RealtimePostgresUpdatePayload } from "@supabase/supabase-js";
@@ -810,27 +809,37 @@ function WellnessCard({ wellness, loading }: WellnessCardProps) {
   );
 }
 
-// ── WeatherCard ───────────────────────────────────────────────
+// ── EnvTile — BJ clock + weather merged ───────────────────────
 
-interface WeatherCardProps {
+interface EnvTileProps {
   weather: WeatherPayload | null;
   loading: boolean;
 }
 
-function WeatherCard({ weather, loading }: WeatherCardProps) {
+function EnvTile({ weather, loading }: EnvTileProps) {
+  const bj = getBjClock();
   return (
     <div className="rounded-3xl bg-white border border-slate-100 shadow-sm px-5 py-5 flex flex-col gap-3">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <span className="text-xl">{weather ? weatherIcon(weather.icon_code) : "🌤️"}</span>
-          <p className="text-slate-700 font-semibold text-base">妈妈所在城市天气</p>
+      {/* Clock row */}
+      <div className="flex items-end justify-between">
+        <div>
+          <p className="text-slate-800 text-3xl font-bold tabular-nums leading-none">{bj.time}</p>
+          <p className="text-slate-400 text-sm mt-1">北京 · {bj.period}</p>
         </div>
-        {weather && (
-          <span className="text-sm text-slate-500 font-medium">
-            当前气温: {weather.temp_c}°C
-          </span>
-        )}
+        <div className="text-right flex flex-col items-end gap-0.5">
+          {loading && !weather ? (
+            <div className="w-5 h-5 rounded-full border-2 border-slate-200 border-t-slate-400 animate-spin" />
+          ) : weather ? (
+            <>
+              <p className="text-slate-700 font-semibold">
+                {weatherIcon(weather.icon_code)} {weather.temp_c}°C
+              </p>
+              <p className="text-slate-400 text-xs">
+                {weather.temp_min}–{weather.temp_max}°C · {weather.text}
+              </p>
+            </>
+          ) : null}
+        </div>
       </div>
 
       {/* Pressure bar */}
@@ -841,11 +850,9 @@ function WeatherCard({ weather, loading }: WeatherCardProps) {
             <div
               className={[
                 "h-full rounded-full transition-all duration-700",
-                weather.pressure < 1005
-                  ? "bg-amber-400"
-                  : weather.pressure < 1010
-                  ? "bg-sky-400"
-                  : "bg-emerald-400",
+                weather.pressure < 1005 ? "bg-amber-400"
+                : weather.pressure < 1010 ? "bg-sky-400"
+                : "bg-emerald-400",
               ].join(" ")}
               style={{ width: `${Math.min(100, ((weather.pressure - 990) / 40) * 100)}%` }}
             />
@@ -856,19 +863,81 @@ function WeatherCard({ weather, loading }: WeatherCardProps) {
         </div>
       )}
 
-      {/* Temp range + AI insight */}
+      {/* AI insight */}
       {weather && (
-        <p className="text-slate-400 text-xs">
-          气温 {weather.temp_min}–{weather.temp_max}°C · {weather.text}
+        <p className="text-slate-500 text-sm leading-relaxed">
+          {generateInsight(weather)}
         </p>
       )}
-      <p className="text-slate-500 text-sm leading-relaxed">
-        {loading
-          ? "正在获取天气数据…"
-          : weather
-          ? generateInsight(weather)
-          : "天气数据暂时不可用，请稍后再试。"}
-      </p>
+    </div>
+  );
+}
+
+// ── SeniorIdentityTile — flat profile + device status ─────────
+
+interface SeniorIdentityTileProps {
+  name:         string;
+  lastMetricAt: string | null;
+}
+
+function SeniorIdentityTile({ name, lastMetricAt }: SeniorIdentityTileProps) {
+  const minutesSince = lastMetricAt
+    ? (Date.now() - new Date(lastMetricAt).getTime()) / 60_000
+    : null;
+
+  const deviceStatus =
+    minutesSince === null         ? '未连接'
+    : minutesSince >= OFFLINE_MIN ? '信号中断'
+    : minutesSince >= DORMANT_MIN ? '休眠中'
+    : '在线';
+
+  const dotCls =
+    minutesSince === null         ? 'bg-slate-500'
+    : minutesSince >= OFFLINE_MIN ? 'bg-amber-400'
+    : minutesSince >= DORMANT_MIN ? 'bg-slate-400'
+    : 'bg-emerald-400';
+
+  const isLive = minutesSince !== null && minutesSince < DORMANT_MIN;
+  const displayName = name.trim() || '长辈';
+
+  return (
+    <div
+      className="rounded-3xl px-5 py-5 flex flex-col gap-4"
+      style={{ background: 'linear-gradient(135deg, #1e1b4b 0%, #312e81 100%)' }}
+    >
+      {/* Name + device badge */}
+      <div className="flex items-start justify-between">
+        <div>
+          <p className="text-indigo-300 text-[11px] font-medium uppercase tracking-widest mb-1">
+            平安扣绑定
+          </p>
+          <p className="text-white text-xl font-bold">{displayName}的平安扣</p>
+        </div>
+        <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/10 border border-white/10">
+          <span className={[
+            "w-1.5 h-1.5 rounded-full shrink-0",
+            dotCls,
+            isLive ? "animate-pulse" : "",
+          ].join(" ")} />
+          <span className="text-white/80 text-xs font-medium">{deviceStatus}</span>
+        </div>
+      </div>
+
+      {/* Info grid */}
+      <div className="grid grid-cols-3 gap-0 divide-x divide-white/10">
+        <div className="flex flex-col gap-0.5 pr-4">
+          <span className="text-indigo-300/70 text-[11px]">年龄</span>
+          <span className="text-white/90 text-sm font-medium">未设置</span>
+        </div>
+        <div className="flex flex-col gap-0.5 px-4">
+          <span className="text-indigo-300/70 text-[11px]">关系</span>
+          <span className="text-white/90 text-sm font-medium">家人</span>
+        </div>
+        <div className="flex flex-col gap-0.5 pl-4">
+          <span className="text-indigo-300/70 text-[11px]">所在地</span>
+          <span className="text-white/90 text-sm font-medium">北京</span>
+        </div>
+      </div>
     </div>
   );
 }
@@ -879,6 +948,7 @@ export default function CarerDashboard() {
   const supabase = useMemo(() => createClient(), []);
 
   const [seniorId,     setSeniorId]     = useState<string | null>(null);
+  const [seniorName,   setSeniorName]   = useState<string>('');
   const [checkins,     setCheckins]     = useState<CheckinRow[]>([]);
   const [weather,      setWeather]      = useState<WeatherPayload | null>(null);
   const [weatherLoad,  setWeatherLoad]  = useState(true);
@@ -911,15 +981,17 @@ export default function CarerDashboard() {
     // Find the senior this carer watches
     const { data: profiles, error: profilesError } = await supabase
       .from("senior_profiles")
-      .select("id")
+      .select("id, name")
       .limit(1);
 
     if (profilesError) {
       console.error('[carer] senior_profiles query failed:', profilesError.message, profilesError.code);
     }
 
-    const id = (profiles?.[0] as { id: string } | undefined)?.id ?? null;
+    const profile = (profiles?.[0] as { id: string; name: string } | undefined);
+    const id = profile?.id ?? null;
     setSeniorId(id);
+    setSeniorName(profile?.name ?? '');
 
     if (id) {
       const { data: rows, error: checkinsError } = await supabase
@@ -1194,72 +1266,49 @@ export default function CarerDashboard() {
         pageReady ? "opacity-100" : "opacity-0",
       ].join(" ")}
     >
-      <div className="max-w-md mx-auto px-4 pt-12 pb-10 flex flex-col gap-5">
+      <div className="max-w-md mx-auto px-4 pt-8 pb-10 flex flex-col gap-4">
 
-        {/* ── Page header ── */}
-        <div className="px-1 flex items-start justify-between">
-          <div>
-            <p className="text-slate-400 text-sm">{getGreeting()}</p>
-            <h1 className="text-slate-800 text-2xl font-semibold mt-0.5">
-              平安扣看板
-            </h1>
-          </div>
-          {/* Beijing time + profile shortcut */}
-          <div className="flex items-center gap-3 mt-0.5">
-            <div className="flex flex-col items-end">
-              <span className="text-slate-700 text-lg font-semibold leading-tight tabular-nums">
-                {getBjClock().time}
-              </span>
-              <span className="text-xs text-slate-400 mt-0.5">
-                北京 · {getBjClock().period}
-              </span>
-            </div>
-            <Link
-              href="/carer/profile"
-              className="flex h-8 w-8 items-center justify-center rounded-full bg-white shadow-sm active:scale-95 transition-transform"
-              aria-label="长辈信息"
-            >
-              <UserCog className="h-4 w-4 text-slate-500" />
-            </Link>
-          </div>
+        {/* ① Environment — BJ clock + weather merged */}
+        <EnvTile weather={bjWeather} loading={bjWeatherLoad} />
+
+        {/* ② Send a message — immediately below environment */}
+        <div className="rounded-3xl bg-white border border-slate-100 shadow-sm px-5 py-5">
+          <p className="text-slate-700 font-semibold text-base mb-3">给妈妈发条消息</p>
+          <ComposeMessage seniorId={seniorId} />
         </div>
 
-        {/* ── Status header ── */}
-        <StatusHeader
-          status={status}
-          pulse={pulse}
-          onPulseEnd={() => setPulse(false)}
-          onDismiss={() => setDismissedId(status.itemId)}
-          healthData={healthData}
-          lastMetricAt={lastMetricAt}
-        />
+        {/* ③ Senior identity tile — deep indigo */}
+        <SeniorIdentityTile name={seniorName} lastMetricAt={lastMetricAt} />
 
-        {/* ── Sleep insights (Vitals Cluster) ── */}
-        <SleepInsightsCard session={sleepSession} />
+        {/* ④⑤ Vitals cluster — connection + sleep, tight spacing */}
+        <div className="flex flex-col gap-3">
+          <StatusHeader
+            status={status}
+            pulse={pulse}
+            onPulseEnd={() => setPulse(false)}
+            onDismiss={() => setDismissedId(status.itemId)}
+            healthData={healthData}
+            lastMetricAt={lastMetricAt}
+          />
+          <SleepInsightsCard session={sleepSession} />
+        </div>
 
-        {/* ── AI wellness analysis ── */}
+        {/* ⑥ AI wellness */}
         <WellnessCard wellness={wellness} loading={bjWeatherLoad && !healthData} />
 
-        {/* ── Beijing weather (Mom's city) ── */}
-        <WeatherCard weather={bjWeather} loading={bjWeatherLoad} />
-
-        {/* ── Timeline ── */}
+        {/* ⑦ Signal timeline */}
         <div className="bg-white rounded-3xl border border-slate-100 shadow-sm px-5 py-5">
-          <div className="flex items-center justify-between mb-5">
+          <div className="flex items-center justify-between mb-4">
             <p className="text-slate-700 font-semibold text-base">平安扣信号</p>
-            {/* Live badge */}
             <span className="flex items-center gap-1.5 text-xs text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
               实时
             </span>
           </div>
-          <ComposeMessage seniorId={seniorId} />
-          <div className="mt-4">
-            <FamilyTimeline items={feed} />
-          </div>
+          <FamilyTimeline items={feed} />
         </div>
 
-        {/* ── Footer — Jack's local time, discreet ── */}
+        {/* Footer */}
         <p className="text-center text-[11px] text-slate-300 pb-2 tabular-nums">
           你的本地时间 {getLocalClock()}
         </p>

@@ -2,7 +2,7 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, ChevronUp } from "lucide-react";
 import { createClient } from "@/lib/supabase";
 import type { FeedItem } from "@/types/messages";
 
@@ -173,9 +173,30 @@ function ItemContent({ item, isLatest }: { item: FeedItem; isLatest: boolean }) 
 // ── FamilyTimeline ────────────────────────────────────────────
 
 const MAX_DAYS = 7;
+const AUTO_COLLAPSE_MS = 3 * 60 * 1000; // 3 minutes
 
 export default function FamilyTimeline({ items }: { items: FeedItem[] }) {
   const [daysShown, setDaysShown] = useState(1);
+  const collapseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Start/reset auto-collapse timer whenever user expands beyond today
+  useEffect(() => {
+    if (daysShown <= 1) {
+      if (collapseTimer.current) clearTimeout(collapseTimer.current);
+      collapseTimer.current = null;
+      return;
+    }
+    if (collapseTimer.current) clearTimeout(collapseTimer.current);
+    collapseTimer.current = setTimeout(() => setDaysShown(1), AUTO_COLLAPSE_MS);
+    return () => {
+      if (collapseTimer.current) clearTimeout(collapseTimer.current);
+    };
+  }, [daysShown]);
+
+  const collapse = () => {
+    if (collapseTimer.current) clearTimeout(collapseTimer.current);
+    setDaysShown(1);
+  };
 
   const visibleItems = useMemo(
     () => items.filter((it) => bjDaysAgo(it.created_at) < daysShown),
@@ -185,6 +206,8 @@ export default function FamilyTimeline({ items }: { items: FeedItem[] }) {
   const hasMore =
     daysShown < MAX_DAYS &&
     items.some((it) => bjDaysAgo(it.created_at) === daysShown);
+
+  const isExpanded = daysShown > 1;
 
   const groups = useMemo(() => {
     const result: { label: string; items: FeedItem[] }[] = [];
@@ -244,16 +267,31 @@ export default function FamilyTimeline({ items }: { items: FeedItem[] }) {
         ))
       )}
 
-      {hasMore && (
-        <button
-          type="button"
-          onClick={() => setDaysShown((d) => d + 1)}
-          className="w-full mt-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-medium text-slate-400 active:scale-95 transition-all"
-        >
-          <ChevronDown className="w-3.5 h-3.5" />
-          显示更多
-        </button>
-      )}
+      <div className="flex items-center gap-2 mt-1">
+        {hasMore && (
+          <button
+            type="button"
+            onClick={() => setDaysShown((d) => d + 1)}
+            className="flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-medium text-slate-400 active:scale-95 transition-all"
+          >
+            <ChevronDown className="w-3.5 h-3.5" />
+            显示更多
+          </button>
+        )}
+        {isExpanded && (
+          <button
+            type="button"
+            onClick={collapse}
+            className={[
+              "flex items-center justify-center gap-1.5 py-2.5 text-xs font-medium text-slate-400 active:scale-95 transition-all",
+              hasMore ? "flex-1 border-l border-slate-100" : "w-full",
+            ].join(" ")}
+          >
+            <ChevronUp className="w-3.5 h-3.5" />
+            收起
+          </button>
+        )}
+      </div>
     </div>
   );
 }

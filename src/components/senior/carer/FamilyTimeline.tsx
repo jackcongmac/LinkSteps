@@ -111,7 +111,17 @@ function VoicePlayButton({ audioUrl }: { audioUrl: string }) {
 
 // ── ItemContent ───────────────────────────────────────────────
 
-function ItemContent({ item, isLatest, seniorName }: { item: FeedItem; isLatest: boolean; seniorName: string }) {
+function ItemContent({
+  item,
+  isLatest,
+  seniorName,
+  onCallPressed,
+}: {
+  item:           FeedItem;
+  isLatest:       boolean;
+  seniorName:     string;
+  onCallPressed?: (id: string) => void;
+}) {
   const labelCls = ["text-sm font-medium", isLatest ? "text-emerald-700" : "text-slate-600"].join(" ");
   const ts = <p className="text-xs text-slate-400">{formatTimestamp(item.created_at)}</p>;
 
@@ -169,9 +179,18 @@ function ItemContent({ item, isLatest, seniorName }: { item: FeedItem; isLatest:
 
   if (item.kind === "alert") return (
     <div className="flex flex-col gap-1 pt-0.5 flex-1 min-w-0">
-      <div className="inline-flex items-center gap-2 px-3 py-2 rounded-2xl bg-red-50 border border-red-100">
-        <span className="text-base">⚠️</span>
-        <p className="text-sm font-medium text-red-700">{item.content}</p>
+      <div className="flex items-center gap-2">
+        <div className="flex-1 inline-flex items-center gap-2 px-3 py-2 rounded-2xl bg-red-50 border border-red-100 min-w-0">
+          <span className="text-base shrink-0">⚠️</span>
+          <p className="text-sm font-medium text-red-700 leading-snug">{item.content}</p>
+        </div>
+        <a
+          href="tel:"
+          onClick={() => onCallPressed?.(item.id)}
+          className="shrink-0 flex items-center gap-1 px-3 py-2 rounded-2xl bg-red-500 text-white text-xs font-semibold active:scale-95 transition-transform"
+        >
+          📞 打电话
+        </a>
       </div>
       <p className="text-xs text-slate-400 mt-0.5">{formatTimestamp(item.created_at)}</p>
     </div>
@@ -186,8 +205,23 @@ const MAX_DAYS = 7;
 const AUTO_COLLAPSE_MS = 3 * 60 * 1000; // 3 minutes
 
 export default function FamilyTimeline({ items, seniorName }: { items: FeedItem[]; seniorName: string }) {
-  const [daysShown, setDaysShown] = useState(1);
+  const [daysShown,    setDaysShown]    = useState(1);
+  const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set());
   const collapseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const supabase = useMemo(() => createClient(), []);
+
+  const handleCallPressed = useCallback(async (id: string) => {
+    // Immediately hide the alert in the timeline
+    setDismissedIds((prev) => new Set([...prev, id]));
+    // Mark as read in DB — fire-and-forget, don't block the phone dialer
+    supabase
+      .from("messages")
+      .update({ is_read: true, read_at: new Date().toISOString() })
+      .eq("id", id)
+      .then(({ error }) => {
+        if (error) console.warn("[FamilyTimeline] mark-read failed:", error.message);
+      });
+  }, [supabase]);
 
   // Start/reset auto-collapse timer whenever user expands beyond today
   useEffect(() => {
@@ -209,8 +243,8 @@ export default function FamilyTimeline({ items, seniorName }: { items: FeedItem[
   };
 
   const visibleItems = useMemo(
-    () => items.filter((it) => bjDaysAgo(it.created_at) < daysShown),
-    [items, daysShown],
+    () => items.filter((it) => bjDaysAgo(it.created_at) < daysShown && !dismissedIds.has(it.id)),
+    [items, daysShown, dismissedIds],
   );
 
   const hasMore =
@@ -270,7 +304,7 @@ export default function FamilyTimeline({ items, seniorName }: { items: FeedItem[
                     <div className={`relative z-10 mt-1 w-5 h-5 rounded-full shrink-0 flex items-center justify-center ${dotCls}`}>
                       {isLatest && <div className="w-2 h-2 rounded-full bg-white" />}
                     </div>
-                    <ItemContent item={item} isLatest={isLatest} seniorName={seniorName} />
+                    <ItemContent item={item} isLatest={isLatest} seniorName={seniorName} onCallPressed={handleCallPressed} />
                   </li>
                 );
               })}

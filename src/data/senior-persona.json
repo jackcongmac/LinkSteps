@@ -1,0 +1,23 @@
+{
+  "routine": {
+    "wakeTime": "05:00",
+    "outOfBedTime": "06:00",
+    "afternoonNapTime": "14:00",
+    "description": "每天早上5点醒来，6点起床；下午2点左右午睡"
+  },
+  "hobby": {
+    "morningWalk": {
+      "description": "早饭后出门晨练，在户外晒太阳、与老朋友相聚，一直到午饭时间",
+      "weatherConstraint": "仅在天气晴好时进行——有风或下雨时取消，留在室内"
+    }
+  },
+  "family": {
+    "grandson": "Ethan"
+  },
+  "health": {
+    "conditions": ["高血压", "心脏疾病", "肺部阴影", "糖尿病"],
+    "medications": "每日服用多种药物",
+    "priorities": ["心脏稳定", "血糖稳定"],
+    "notes": "所有建议必须优先考虑心脏和血糖的稳定性，不建议剧烈运动"
+  }
+}

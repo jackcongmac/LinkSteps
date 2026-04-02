@@ -1271,10 +1271,12 @@ export default function CarerDashboard() {
 
   // ── AI Wellness Insight — throttled fetch ─────────────────────
   const fetchWellnessInsight = useCallback(async (
-    smoothedHr: number,
-    steps:      number,
-    pressure:   number,
-    sleep:      number,
+    smoothedHr:  number,
+    steps:       number,
+    pressure:    number,
+    sleep:       number,
+    weatherText: string | undefined,
+    iconCode:    string | undefined,
   ) => {
     const now = Date.now();
     // Throttle: max one AI call per 5 minutes
@@ -1288,7 +1290,9 @@ export default function CarerDashboard() {
         method:  "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          metrics: { pressure, sleep, steps, heartRate: smoothedHr },
+          metrics:     { pressure, sleep, steps, heartRate: smoothedHr },
+          weatherText,
+          iconCode,
         }),
       });
       if (res.ok) {
@@ -1316,9 +1320,11 @@ export default function CarerDashboard() {
 
     fetchWellnessInsight(
       smoothedHr,
-      healthData?.steps     ?? 0,
-      bjWeather?.pressure   ?? 1013,
+      healthData?.steps         ?? 0,
+      bjWeather?.pressure       ?? 1013,
       sleepSession?.total_hours ?? 6.5,
+      bjWeather?.text,
+      bjWeather?.icon_code,
     );
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [healthData, bjWeather, sleepSession]);

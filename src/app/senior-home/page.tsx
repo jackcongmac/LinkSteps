@@ -297,7 +297,7 @@ export default function SeniorHomePage() {
       ].join(" ")}
     >
       {/* ── 天气 + 晚辈留言 ── */}
-      <div className="w-full max-w-sm rounded-3xl bg-white border border-slate-100 shadow-sm px-5 py-5 flex flex-col gap-4">
+      <div className="w-full max-w-md rounded-3xl bg-white border border-slate-100 shadow-sm px-5 py-5 flex flex-col gap-4">
 
         {/* EnvTile: clock row */}
         <div className="flex items-end justify-between">
@@ -382,7 +382,7 @@ export default function SeniorHomePage() {
         carerName="小杰"
       />
 
-      <div className="flex flex-col gap-3 w-full max-w-sm">
+      <div className="flex flex-col gap-3 w-full max-w-md">
         <VoiceRecorder seniorId={seniorId} />
         <QuickRequest  seniorId={seniorId} />
       </div>

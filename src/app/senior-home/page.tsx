@@ -379,7 +379,7 @@ export default function SeniorHomePage() {
 
       <PeaceButton
         seniorId={seniorId}
-        carerName="小杰"
+        carerName="Jack"
       />
 
       <div className="flex flex-col gap-3 w-full max-w-md">

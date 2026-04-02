@@ -47,7 +47,7 @@ interface PeaceButtonProps {
 
 export default function PeaceButton({
   seniorId,
-  carerName = "小杰",
+  carerName = "Jack",
   onSuccess,
 }: PeaceButtonProps) {
   const [state, setState] = useState<ButtonState>("idle");

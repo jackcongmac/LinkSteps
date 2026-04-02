@@ -1,6 +1,6 @@
 # LinkSteps Senior: Backend & Data Architecture PRD
 
-> **最后更新**：2026-03-31（反映 v0.4 实现状态）
+> **最后更新**：2026-04-01（反映 v0.5 实现状态）
 
 ---
 
@@ -75,18 +75,53 @@
 
 ### 3-B WellnessScore 规则引擎（wellness-score.ts）
 
-评分 0–100，按优先级逐项扣分：
+评分 0–100，优先级规则链（7 条，按序匹配，命中即返回）：
 
-| 指标 | 权重 | 临界值 | 扣分触发 |
+| 优先级 | 触发条件 | Level | Score |
 |---|---|---|---|
-| HRV | 50% | 降幅 ≥35% 基线 → critical；≥20% → care | 最大权重 |
-| 深度睡眠 | 15% | < 1 小时 → critical | 高阶设备才有 |
-| 气压 | 15% | < 1010 hPa → care（关节风险） | Tier 1，始终可用 |
-| 步数 | 20% | < 50% 基线 → care | Tier 1，始终可用 |
+| 1 | heart_rate > 120 | critical | 40 |
+| 2 | pressure < 1005 AND sleep < 6h | alert | 60 |
+| 3 | steps > 3000 AND heart_rate < 90 | great | 90 |
+| 4 | pressure < 1010 | good | 70 |
+| 5 | sleep < 6h | alert | 65 |
+| 6 | steps < 1500 | good | 72 |
+| 7 | 全部通过 | great | 85 |
 
-Level 输出：`great`(80–100) / `good`(60–79) / `alert`(40–59) / `critical`(0–39)
+**用途**：作为 LLM 调用失败时的确定性兜底，以及 score/level 的始终来源（LLM 只覆盖 advice 文字）。
 
-### 3-C AI 气象洞察（generateInsight，规则引擎）
+### 3-C LLM 健康洞察路由（POST /api/senior/wellness-insight）
+
+> **2026-04-01 新增** — 替代原纯规则引擎的 advice 文字输出
+
+**完整数据流：**
+
+```
+客户端 carer/page.tsx
+  → POST /api/senior/wellness-insight
+    body: { metrics: { pressure, sleep, steps, heartRate }, weatherText, iconCode }
+  ↓
+服务端（Next.js Route Handler）
+  1. createServerClient() — Cookie session 认证，验证 auth.uid()
+  2. SELECT senior_profiles WHERE created_by = auth.uid()
+     → 获取 name / age / gender / relationship / custom_relation
+  3. SELECT senior_baselines WHERE senior_id = profile.id
+     → 若不存在：自动 UPSERT 默认值（steps:3000, hr:72, sleep:7h, hrv:35）
+  4. import senior-persona.json → 注入作息/爱好/健康/家庭上下文
+  5. isBadWeather(iconCode, weatherText) → 天气门控标志
+  6. calculateSeniorWellness(metrics) → 规则引擎（score + level，确定性）
+  7. generateText(claude-haiku) → LLM 生成 advice 文字
+     ↓ 失败/无 API Key → 使用规则引擎 advice 兜底
+  8. Response.json({ score, level, advice })
+```
+
+**5 分钟 HR 平滑（客户端）：**
+- `hrReadings[]` state 维护一个滑动窗口（保留最近 5 分钟的心率记录）
+- 每次 Realtime 新增 heart_rate → 追加到窗口，过滤掉 5 分钟前的记录
+- 发送给 API 的 `heartRate` = 窗口内所有读数的均值（防止模拟器 spike 触发误报）
+
+**限流：**客户端 `lastWellnessFetch` ref，最多每 5 分钟触发一次 AI 调用。
+
+### 3-D AI 气象洞察（generateInsight，规则引擎）
 
 输入 `WeatherPayload`，输出一句关怀提醒：
 
@@ -124,7 +159,19 @@ StatusHeader：计算 isDormant / isOffline / isAnomaly
     ↓ isAnomaly 边界 false→true
 handleAnomaly()：INSERT messages（type='alert'）
     ↓ Realtime broadcast
-FamilyTimeline：新增红色 ⚠️ 警报条目
+FamilyTimeline：新增红色 ⚠️ 警报条目 + 「📞 打电话」按钮
+    ↓ 晚辈点击「打电话」
+dismissedIds.add(id) → 警报消失 + tel: 拨号 + DB is_read=true
+```
+
+```
+hrReadings[] 滑动窗口（客户端 state）
+    ↓ 每次 heart_rate Realtime 事件追加 + 过滤 5 分钟前记录
+    ↓ 每次 healthData / bjWeather / sleepSession 变化
+fetchWellnessInsight()（限流 5min）
+    ↓ POST /api/senior/wellness-insight
+    ↓ 服务端：auth → profile → baselines → persona → Claude Haiku
+WellnessCard：显示「AI 分析中…」→ 更新 score / level / advice
 ```
 
 ```
@@ -151,6 +198,7 @@ checkins 表 INSERT
 | `20260401000002_senior_profile_update_policy.sql` | 2026-04-01 | senior_profiles UPDATE RLS 政策（created_by = auth.uid()） |
 | `20260401000003_messages_sender_name.sql` | 2026-04-01 | messages 新增 sender_name 字段（冗余，避免跨用户 RLS） |
 | `20260401000004_messages_alert_type.sql` | 2026-04-01 | messages type CHECK 扩展：新增 'alert' 类型 |
+| `20260401000005_seed_senior_baselines.sql` | 2026-04-01 | 为演示长辈档案插入默认基线（steps:2800, hr:72, sleep:7h, hrv:35） |
 
 ### 关键 RLS 政策汇总
 
@@ -181,7 +229,7 @@ voice-memos/
 
 ---
 
-## 8. 开发工具
+## 8. 开发工具与配置
 
 ### health-simulator.ts
 - 每 30 秒向 `health_metrics` 插入模拟心率（70–130 bpm，含随机 spike）+ 步数
@@ -194,3 +242,25 @@ voice-memos/
 DELETE FROM messages  WHERE created_at  < NOW() - INTERVAL '7 days';
 DELETE FROM checkins  WHERE checked_in_at < NOW() - INTERVAL '7 days';
 ```
+
+### 环境变量（.env.local）
+
+| 变量 | 用途 | 必填 |
+|---|---|---|
+| `NEXT_PUBLIC_SUPABASE_URL` | Supabase 项目 URL | ✅ |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase 匿名 Key | ✅ |
+| `QWEATHER_API_KEY` | 和风天气 API（气象数据） | ✅ |
+| `ANTHROPIC_API_KEY` | Anthropic API（WellnessCard LLM）| 可选，缺省降级为规则引擎 |
+
+### AI 依赖（package.json）
+
+| 包 | 版本 | 用途 |
+|---|---|---|
+| `ai` | ^6.x | Vercel AI SDK core（generateText） |
+| `@ai-sdk/anthropic` | latest | Anthropic provider for claude-haiku |
+
+### senior-persona.json
+- 位置：`src/data/senior-persona.json`
+- 服务端导入，注入 Claude system prompt
+- 包含：作息 / 爱好（晨练天气门控）/ 家庭（孙子 Ethan）/ 健康状况 / AI 优先级
+- **修改此文件无需重启服务**（Next.js Route Handler 按需导入）

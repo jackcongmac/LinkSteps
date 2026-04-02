@@ -3,7 +3,7 @@
 > **战略基调**："关怀，不是监管"
 > 本文档是 Senior 模块的产品蓝图，供 Architect / Frontend / QA 三端对齐使用。
 > 依据：`SENIOR_VISION.md` + `SENIOR_BACKEND_PRD.md`
-> **最后更新**：2026-03-31（反映 v0.4 实现状态）
+> **最后更新**：2026-04-01（反映 v0.5 实现状态）
 
 ---
 
@@ -75,7 +75,10 @@
 │     └── 今日睡眠时长 + 状态（deep/light/nap/resting/awake）
 │
 ├── [AI 健康洞察] WellnessCard
-│     └── 综合步数 + 心率 + 睡眠 + 气象的规则引擎输出
+│     ├── 异步加载：显示「AI 分析中…」脉冲动画直到结果返回
+│     ├── 调用 POST /api/senior/wellness-insight（每 5 分钟限流一次）
+│     ├── 输入：5 分钟均值心率 + 步数 + 睡眠 + 气压 + 今日天气文本 + icon code
+│     └── 输出：Claude Haiku 生成的个性化建议（基于长辈 Persona + 7 天基线对比）
 │
 ├── [长辈身份卡片] SeniorIdentityTile → 跳转 /carer/profile
 │     └── 名字 + 年龄 + 性别 + 设备连接状态
@@ -84,7 +87,11 @@
       ├── 默认展示「今天」；点击向下箭头逐日展开（最多 7 天）
       ├── 「收起」按钮 + 3 分钟自动收起
       ├── 事件类型：平安信号 / 文字消息 / 语音留言 / 微信请求 / 电话请求 / 系统警报
-      └── 时间格式：刚刚 / X分钟前·HH:mm / X小时前·HH:mm / 昨天·HH:mm / 周X·HH:mm
+      ├── 时间格式：刚刚 / X分钟前·HH:mm / X小时前·HH:mm / 昨天·HH:mm / 周X·HH:mm
+      └── [Alert 卡片] 红色 ⚠️ 警报 + 「📞 打电话」按钮
+            ├── 点击「打电话」→ 警报立即从 Timeline 消失（本地 dismissedIds state）
+            ├── href="tel:" 打开手机原生拨号界面
+            └── 后台异步将 messages.is_read 更新为 true
 
 /carer/profile
 │
@@ -128,14 +135,17 @@
 → 晚辈端 FamilyTimeline 实时新增「发送了平安信号」条目
 ```
 
-### Journey D — 心率异常自动告警
+### Journey D — 心率异常自动告警 + 打电话处置
 
 ```
 health-simulator（或真实设备）写入 health_metrics：heart_rate > 120
 → StatusHeader 检测到 isAnomaly（边界：false → true）
 → 自动 INSERT messages：type='alert', content='心率异常：XXX 次/分，系统已触发提醒'
-→ FamilyTimeline 实时出现红色 ⚠️ 告警卡片
-→ StatusHeader 显示「立即拨打妈妈」按钮
+→ FamilyTimeline 实时出现红色 ⚠️ 告警卡片 + 「📞 打电话」按钮
+→ 晚辈点击「打电话」
+→ 告警卡片立即消失（dismissedIds 本地 state）
+→ 原生拨号界面弹出（href="tel:"）
+→ 后台异步 UPDATE messages.is_read = true
 ```
 
 ### Journey E — 长辈发语音留言
@@ -273,10 +283,11 @@ type FeedItem =
 
 | 路由 | 方法 | 状态 | 说明 |
 |---|---|---|---|
-| `/api/weather?city=beijing` | GET | ✅ 已实现 | QWeather 代理，返回 temp/pressure/icon_code |
+| `/api/weather?city=beijing` | GET | ✅ 已实现 | QWeather 代理，返回 temp/pressure/icon_code/text |
 | `/api/senior/checkin` | POST | ✅ 已实现 | 平安扣点击写入 checkins |
 | `/api/senior/health-sync` | POST | ✅ 已实现 | 手动触发健康数据同步 |
 | `/api/senior/voice-url` | GET | ✅ 已实现 | 生成 Supabase Storage 签名 URL |
+| `/api/senior/wellness-insight` | POST | ✅ 已实现 | 服务端认证 → 拉取 profile + baselines → 调用 Claude Haiku 生成个性化健康建议 |
 | `/api/senior/create` | POST | 📋 待实现 | 创建 senior_profile + 返回 QR 邀请链接 |
 | `/api/senior/[id]/status` | GET | 📋 待实现 | 最新 AI assessment |
 | `/api/senior/[id]/history` | GET | 📋 待实现 | 历史 ai_assessments 列表 |
@@ -316,7 +327,7 @@ type FeedItem =
 | `carer/page.tsx` | `EnvTile` | 上海时钟 + 天气 + 气压条 + AI 洞察 |
 | `carer/page.tsx` | `StatusHeader` | 实时心率环 + isAnomaly 检测 + onAnomaly 回调 |
 | `carer/page.tsx` | `SleepInsightsCard` | 睡眠状态卡片 |
-| `carer/page.tsx` | `WellnessCard` | 综合健康洞察 |
+| `carer/page.tsx` | `WellnessCard` | 异步 AI 健康洞察（loading 状态 + Claude Haiku 建议） |
 | `carer/page.tsx` | `SeniorIdentityTile` | 长辈身份 + 设备状态 |
 | `carer/page.tsx` | `NightStatusPanel` | 夜间睡眠状态面板 |
 | `senior-home/page.tsx` | EnvTile（内联） | 北京时钟 + 天气 + 气压条 + AI 洞察 + 晚辈消息展示 |
@@ -337,8 +348,10 @@ type FeedItem =
 | 长辈档案编辑（姓名/年龄/关系/性别） | Phase 1 | ✅ 已实现 |
 | 7 天数据保留（pg_cron） | Phase 1 | ✅ 已实现 |
 | 心率异常实时警报 + 自动 Timeline 记录 | Phase 1 | ✅ 已实现 |
+| 告警卡片「打电话」按钮 + 即时消失 | Phase 1 | ✅ 已实现（2026-04-01） |
 | 睡眠状态卡 | Phase 2 | ✅ 已实现（dev simulator） |
-| 综合 AI 健康洞察（WellnessCard） | Phase 2 | ✅ 已实现（规则引擎） |
+| 综合 AI 健康洞察（WellnessCard） | Phase 2 | ✅ 已实现（LLM + 基线感知，2026-04-01） |
+| 长辈人格档案（Persona JSON） | Phase 2 | ✅ 已实现（2026-04-01）|
 | 长辈邀请二维码 | Phase 2 | 📋 UI 预留，待实现 |
 | 设备 OAuth 接入（华为/小米） | Phase 2 | 📋 待实现 |
 | SOS 跌倒全屏弹窗 | Phase 3 | 📋 待实现 |
@@ -359,7 +372,42 @@ type FeedItem =
 
 ---
 
-## 8. 与现有 Child 模块的共存策略
+## 8. 长辈人格档案系统 (Senior Persona System)
+
+> 文件位置：`src/data/senior-persona.json`
+
+### 设计原则
+
+Persona 文件是 AI 建议的**静态上下文锚点**，不存储在数据库中。每次调用 `POST /api/senior/wellness-insight` 时由路由在服务端导入，注入 Claude 的 system prompt。
+
+### 当前档案（李叔明）
+
+| 维度 | 内容 |
+|---|---|
+| **作息** | 每天 05:00 醒来，06:00 起床，14:00 午睡 |
+| **爱好** | 早饭后户外晨练，与老朋友晒太阳直到午饭——天气晴好才出门，有风或下雨取消 |
+| **家庭** | 孙子名叫 Ethan（AI 提及孙辈时使用此名） |
+| **健康（关键）** | 高血压、心脏疾病、肺部阴影、糖尿病，每日多种药物 |
+| **AI 优先级** | 所有建议以**心脏稳定**和**血糖稳定**为最高优先级，不建议剧烈运动 |
+
+### 天气门控逻辑
+
+```
+isBadWeather(iconCode, weatherText):
+  风（200–213）| 雨/雪（300–499）| 雾/霾（500–599）→ true
+  中文关键词匹配：风|雨|雪|雾|霾|沙尘               → true（兜底）
+
+天气不佳 → system prompt 注入「明确建议不出门，推荐室内活动」
+天气良好 → system prompt 注入「鼓励按时出门晨练」
+```
+
+### 扩展方式
+
+更新 `src/data/senior-persona.json` 即可，无需修改 AI 路由逻辑。未来支持多长辈时，可将 Persona 移入 `senior_profiles` 的 JSONB 字段并按 `senior_id` 加载。
+
+---
+
+## 9. 与现有 Child 模块的共存策略
 
 | 维度 | Child 模块 | Senior 模块 | 共存方案 |
 |---|---|---|---|
